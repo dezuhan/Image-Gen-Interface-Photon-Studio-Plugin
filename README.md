@@ -17,18 +17,25 @@ written back **only inside the selection** as one undoable step.
 4. Back in **Generate**, make a selection (optional), write a prompt and press **Generate**, then
    **Apply**.
 
-## Sources
+## Two references per generation
 
-The panel has two source modes, chosen with the **Source** control:
+When a selection exists, the plugin exports **two images** and sends both to Replicate:
 
-| Source | Input image | Mask | Result |
-| --- | --- | --- | --- |
-| **Selection only** | the captured selection crop | the selection coverage (feathered) | composited inside the selection with `applyImage(captureToken)` |
-| **Selected layer** | the whole selected layer | none (full rectangle) | written as a new layer aligned to the layer |
+1. **the whole selected layer** — full context, aspect ratio and surrounding artwork;
+2. **the selection crop** — the area that must be regenerated.
 
-*Selection only* is the Photoshop-style generative fill: it requires an active selection, and Photon
-errors clearly when there is none. *Selected layer* ignores the selection entirely and regenerates the
-whole layer as one image.
+They go into `image_input` (nano-banana-2 accepts up to 14 references) and the prompt is prefixed with
+*"Image 1 is the full image for context. Image 2 is the selected area that must be regenerated."*
+so the model knows which reference is the target.
+
+Because Nano Banana has no mask input, its output follows the first reference (the full layer). The
+plugin cuts the selection rectangle out of the returned image, scales it to the capture bounds and
+applies it with `applyImage(captureToken)` — Photon still clips it through the real selection
+coverage, so only the selected area changes.
+
+Without a selection only the layer is sent, and the result becomes a new layer. Models with a real
+mask input (FLUX Fill, Stable Diffusion inpainting) keep their native path: `image` + `mask` of the
+crop instead of two references.
 
 ## How selection editing works
 
@@ -45,8 +52,7 @@ capture API:
 4. If the capture API is unavailable, the plugin still generates from the selected layer and writes
    the result as a new layer with the mask applied to its alpha (masked fallback).
 
-In *Selected layer* mode no capture is taken; the layer pixels are the base image and the result
-lands as a new layer aligned to the layer's bounds.
+
 
 ## Providers
 
@@ -128,6 +134,16 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.4.0
+
+- **Both exports are sent together.** A selection now produces two references in one request: the
+  full selected layer (context) and the selection crop (target), with a context prefix in the prompt.
+- Nano Banana's full-image output is cropped back to the selection rectangle and scaled to the
+  capture bounds before `applyImage`, so only the selected area is written.
+- The Source dropdown is gone: presence of a selection decides the path (two references vs layer
+  only); models with a mask input still use `image` + `mask`.
+- Tests: 54.
 
 ### 0.3.0
 

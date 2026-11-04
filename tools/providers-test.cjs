@@ -194,13 +194,17 @@ test("nano-banana input uses image_input and never sends a mask", () => {
     model: "google/nano-banana-2",
     prompt: "replace the sky with sunrise",
     image: "data:image/png;base64,AAA",
+    image2: "data:image/png;base64,CCC",
     mask: "data:image/png;base64,BBB",
     steps: 40,
     guidance: 7,
     strength: 0.5,
     seed: 12,
   });
-  assert.deepEqual(input.image_input, ["data:image/png;base64,AAA"]);
+  assert.deepEqual(input.image_input, [
+    "data:image/png;base64,AAA",
+    "data:image/png;base64,CCC",
+  ]);
   assert.equal(input.mask, undefined);
   assert.equal(input.num_inference_steps, undefined);
   assert.equal(input.guidance, undefined);

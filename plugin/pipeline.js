@@ -194,15 +194,8 @@
     const layerId = selected[selected.length - 1];
     if (!layerId) throw new Error("Select a layer in the Layers panel first.");
 
-    const mode = settings.source === "layer" ? "layer" : "selection";
-    if (mode === "selection" && !doc.hasSelection) {
-      throw new Error(
-        "Source is “Selection only”, but nothing is selected. Make a selection in Photon, or switch Source to “Selected layer”.",
-      );
-    }
-
     let capture = null;
-    if (mode === "selection") {
+    if (doc.hasSelection) {
       try {
         capture = await api.documents.capture({});
       } catch {
@@ -230,8 +223,9 @@
     const originX = (read.sourceBounds && read.sourceBounds.left) || 0;
     const originY = (read.sourceBounds && read.sourceBounds.top) || 0;
 
+    // Selection rectangle in layer pixels; captured pixels are used for the crop and the mask.
     let bounds = null;
-    if (mode === "selection" && capture && capture.bounds) {
+    if (capture && capture.bounds) {
       const left = Math.round(capture.bounds.x - originX);
       const top = Math.round(capture.bounds.y - originY);
       bounds = {
@@ -246,13 +240,11 @@
     if (!bounds) bounds = { x: 0, y: 0, width: layerWidth, height: layerHeight };
 
     let mask;
-    if (mode === "selection" && capture && capture.mask && capture.mask.length >= bounds.width * bounds.height) {
+    if (capture && capture.mask && capture.mask.length >= bounds.width * bounds.height) {
       mask = capture.mask.length >= bounds.width * bounds.height * 4
         ? Core.maskFromAlpha(capture.mask, 4, bounds.width, bounds.height)
         : Core.maskFromCoverage(capture.mask, bounds.width, bounds.height);
     } else {
-      // No mask from the host: edit the whole captured rectangle; the host still composites the
-      // result through the real selection coverage when it is applied with the capture token.
       mask = Core.solidMask(bounds.width, bounds.height);
     }
 
@@ -284,6 +276,7 @@
       originY,
       layerWidth,
       layerHeight,
+      layerPixels,
       bounds,
       pixels: cropRgba(layerPixels, layerWidth, layerHeight, bounds),
       width: bounds.width,
@@ -291,9 +284,9 @@
       mask,
       maskWidth: bounds.width,
       maskHeight: bounds.height,
-      captureToken: mode === "selection" && capture && capture.token ? capture.token : null,
-      hasSelection: mode === "selection" && Boolean(doc.hasSelection),
-      mode,
+      captureToken: capture && capture.token ? capture.token : null,
+      hasSelection: Boolean(doc.hasSelection),
+
     };
   }
 
@@ -409,28 +402,55 @@
     const progress = options.progress || (() => {});
     const isCancelled = options.isCancelled || (() => false);
     const source = options.source || (await captureSource({ api, settings }));
+    const family = settings.provider === "replicate" ? Providers.modelFamily(settings.model) : "standard";
+    const twoReferences = family === "nano-banana" && source.hasSelection && Boolean(source.captureToken);
     const targetSize = settings.size === "auto"
       ? Math.min(Core.WORK_SIZES[2], Math.max(512, Core.roundTo(Math.max(source.width, source.height), 64)))
       : Number(settings.size) || Core.WORK_SIZES[2];
-    const plan = Core.planSize(source.width, source.height, targetSize, Core.MAX_PIXELS);
-    const baseImage = resizeRgba(source.pixels, source.width, source.height, plan.width, plan.height);
-    const sendMask = settings.provider === "custom" || Providers.supportsMask(settings.model);
-    const maskImage = sendMask
-      ? Core.scaleMask(source.mask, source.maskWidth, source.maskHeight, plan.width, plan.height)
-      : null;
 
-    progress(0.22, "Encoding…");
-    const imageUri = await encodeDataUri(api, plan.width, plan.height, baseImage);
-    const maskUri = maskImage ? await encodeDataUri(api, plan.width, plan.height, maskImage) : null;
+    progress(0.14, "Encoding…");
+    let imageUri;
+    let image2Uri = null;
+    let maskUri = null;
+    let plan;
+    let outputPlan;
+
+    if (twoReferences) {
+      // Reference 1 = full selected layer (context), reference 2 = the selected crop (target area).
+      plan = Core.planSize(source.layerWidth, source.layerHeight, targetSize, Core.MAX_PIXELS);
+      const fullImage = resizeRgba(source.layerPixels, source.layerWidth, source.layerHeight, plan.width, plan.height);
+      imageUri = await encodeDataUri(api, plan.width, plan.height, fullImage);
+      const cropPlan = Core.planSize(source.width, source.height, targetSize, Core.MAX_PIXELS);
+      const cropImage = resizeRgba(source.pixels, source.width, source.height, cropPlan.width, cropPlan.height);
+      image2Uri = await encodeDataUri(api, cropPlan.width, cropPlan.height, cropImage);
+      outputPlan = { width: plan.width, height: plan.height };
+      progress(0.2, "Encoded the layer and the selection…");
+    } else {
+      plan = Core.planSize(source.width, source.height, targetSize, Core.MAX_PIXELS);
+      const baseImage = resizeRgba(source.pixels, source.width, source.height, plan.width, plan.height);
+      const sendMask = settings.provider === "custom" || Providers.supportsMask(settings.model);
+      const maskImage = sendMask
+        ? Core.scaleMask(source.mask, source.maskWidth, source.maskHeight, plan.width, plan.height)
+        : null;
+      imageUri = await encodeDataUri(api, plan.width, plan.height, baseImage);
+      maskUri = maskImage ? await encodeDataUri(api, plan.width, plan.height, maskImage) : null;
+      outputPlan = { width: plan.width, height: plan.height };
+    }
+
     const bare = imageUri.split(",").pop();
     const bareMask = maskUri ? maskUri.split(",").pop() : null;
+    const useBare = settings.custom && settings.custom.imageSource === "base64";
+    const contextPrefix = twoReferences
+      ? "Image 1 is the full image for context. Image 2 is the selected area that must be regenerated. "
+      : "";
     const payload = {
       model: settings.model,
-      prompt: options.prompt,
-      image: settings.custom && settings.custom.imageSource === "base64" ? bare : imageUri,
-      mask: maskUri ? (settings.custom && settings.custom.imageSource === "base64" ? bareMask : maskUri) : null,
-      width: plan.width,
-      height: plan.height,
+      prompt: contextPrefix + options.prompt,
+      image: useBare ? bare : imageUri,
+      image2: image2Uri ? (useBare ? image2Uri.split(",").pop() : image2Uri) : null,
+      mask: maskUri ? (useBare ? bareMask : maskUri) : null,
+      width: outputPlan.width,
+      height: outputPlan.height,
       seed: options.seed,
       steps: settings.steps,
       guidance: settings.guidance,
@@ -445,12 +465,39 @@
 
     progress(0.88, "Downloading the result…");
     const generated = await decodeImageValue(api, imageValue, settings.custom && settings.custom.imageSource);
-    const fitted = resizeRgba(generated.pixels, generated.width, generated.height, source.width, source.height);
+    let fitted;
+    if (twoReferences) {
+      // The model returns the edited full image: cut the selection region back out before applying.
+      const layerAspect = source.layerWidth / source.layerHeight;
+      const cropAspect = source.width / source.height;
+      const outputAspect = generated.width / generated.height;
+      const treatAsLayer = Math.abs(outputAspect - layerAspect) <= Math.abs(outputAspect - cropAspect);
+      if (treatAsLayer) {
+        const scaleX = generated.width / source.layerWidth;
+        const scaleY = generated.height / source.layerHeight;
+        const region = {
+          x: Math.max(0, Math.round(source.bounds.x * scaleX)),
+          y: Math.max(0, Math.round(source.bounds.y * scaleY)),
+          width: Math.max(1, Math.round(source.width * scaleX)),
+          height: Math.max(1, Math.round(source.height * scaleY)),
+        };
+        region.width = Math.min(region.width, generated.width - region.x);
+        region.height = Math.min(region.height, generated.height - region.y);
+        const crop = cropRgba(generated.pixels, generated.width, generated.height, region);
+        fitted = resizeRgba(crop, region.width, region.height, source.width, source.height);
+      } else {
+        fitted = resizeRgba(generated.pixels, generated.width, generated.height, source.width, source.height);
+      }
+    } else {
+      fitted = resizeRgba(generated.pixels, generated.width, generated.height, source.width, source.height);
+    }
+
     return {
       source,
       image: { width: source.width, height: source.height, pixels: fitted },
       plan,
       providerImage: generated,
+      twoReferences,
     };
   }
 

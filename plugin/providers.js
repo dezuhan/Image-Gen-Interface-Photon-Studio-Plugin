@@ -103,8 +103,10 @@
       // Schema: prompt, image_input (max 14 URIs), aspect_ratio, match_input_image, output_format, seed.
       // No mask, steps or guidance — sending them would be rejected by the model validator.
       const input = { prompt: request.prompt, output_format: "png" };
-      if (request.image) {
-        input.image_input = [request.image];
+      // Two references by default when a selection exists: [full layer for context, selected crop].
+      const references = [request.image, request.image2].filter(Boolean);
+      if (references.length) {
+        input.image_input = references;
         input.match_input_image = true;
       }
       if (request.seed !== null && request.seed !== undefined && request.seed !== "") input.seed = Number(request.seed);

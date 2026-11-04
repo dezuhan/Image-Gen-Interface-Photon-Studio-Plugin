@@ -173,48 +173,23 @@ test("captureSource reads the selection bounds and coverage mask", async () => {
   assert.equal(api.calls.includes("capture"), true);
 });
 
-test("selection mode refuses when nothing is selected", async () => {
+test("without a selection the whole layer is the source", async () => {
   const api = fakeApi({ noSelection: true });
-  await assert.rejects(
-    () => Pipeline.captureSource({ api, settings: replicateSettings({ source: "selection" }) }),
-    /nothing is selected/i,
-  );
-});
-
-test("layer mode uses the whole layer and ignores the selection", async () => {
-  const api = fakeApi({});
-  const source = await Pipeline.captureSource({ api, settings: replicateSettings({ source: "layer" }) });
-  assert.equal(source.mode, "layer");
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
   assert.equal(source.hasSelection, false);
   assert.equal(source.captureToken, null);
   assert.deepEqual(source.bounds, { x: 0, y: 0, width: 400, height: 300 });
   assert.equal(source.mask.length, 400 * 300 * 4);
-  assert.equal(api.calls.includes("capture"), false, "no capture is taken in layer mode");
+  assert.equal(api.calls.includes("capture"), false);
 });
 
-test("layer mode applies the result as a new layer without a capture token", async () => {
+test("with a selection the layer is kept as full context", async () => {
   const api = fakeApi({});
-  const source = await Pipeline.captureSource({ api, settings: replicateSettings({ source: "layer" }) });
-  const outcome = await Pipeline.apply({
-    api,
-    result: {
-      image: { width: source.width, height: source.height, pixels: fillLayer(source.width, source.height, 200) },
-      bounds: source.bounds,
-      originX: 0,
-      originY: 0,
-      captureToken: null,
-      mask: source.mask,
-      maskWidth: source.maskWidth,
-      maskHeight: source.maskHeight,
-      hasSelection: false,
-      prompt: "x",
-      model: "m",
-      docId: "doc1",
-    },
-    name: "layer result",
-  });
-  assert.equal(outcome.method, "writePixels");
-  assert.equal(api.calls.includes("applyImage"), false);
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
+  assert.equal(source.layerWidth, 400);
+  assert.equal(source.layerHeight, 300);
+  assert.equal(source.layerPixels.length, 400 * 300 * 4);
+  assert.deepEqual(source.bounds, { x: 50, y: 40, width: 64, height: 48 });
 });
 
 test("captureSource expands the bounds by the margin", async () => {
@@ -465,15 +440,21 @@ test("generate also works when the host hands back the JSON as bytes", async () 
 });
 
 
-test("generate sends the nano-banana schema when that model is chosen", async () => {
+test("generate sends two references to nano-banana and crops the result back", async () => {
   const api = fakeApi({});
   const settings = replicateSettings({ model: "google/nano-banana-2" });
   const source = await Pipeline.captureSource({ api, settings });
-  await Pipeline.generate({ api, settings, source, prompt: "put a lamp here", seed: 5, pollMs: 1 });
+  const generated = await Pipeline.generate({ api, settings, source, prompt: "put a lamp here", seed: 5, pollMs: 1 });
   const submit = api.lastSubmit;
   assert.ok(submit, "submit request captured");
-  assert.deepEqual(Object.keys(submit.input).sort(), ["image_input", "match_input_image", "output_format", "prompt", "seed"]);
+  assert.equal(submit.input.image_input.length, 2, "full layer + selection crop");
+  assert.ok(submit.input.image_input[0].startsWith("data:image/png;base64,"));
+  assert.ok(submit.input.image_input[1].startsWith("data:image/png;base64,"));
+  assert.match(submit.input.prompt, /^Image 1 is the full image for context\. Image 2 is the selected area/);
   assert.equal(submit.input.mask, undefined);
+  assert.equal(generated.twoReferences, true);
+  assert.equal(generated.image.width, 64, "the result is cropped back to the selection");
+  assert.equal(generated.image.height, 48);
 });
 
 (async () => {
