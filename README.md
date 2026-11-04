@@ -10,6 +10,12 @@ written back **only inside the selection** as one undoable step.
 
 ![Settings panel](docs/settings.png)
 
+## Design system
+
+Panel styling, components and tokens follow [`../design-system`](../design-system/README.md):
+24 px controls, 7 px control radius, 12 px floating surfaces, the canonical `select.js`
+dropdown and the shared header/footer contract.
+
 ## Install
 
 1. Photon Studio → **Preferences → Plug-ins → Install plugin** → select this repository's
@@ -155,6 +161,12 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.7.1
+
+- Added the missing dropdown tokens (`--ig-radius-card`, `--ig-glass`, `--ig-popup-bg`,
+  `--ig-shadow-popup`) so the select menu renders with the design-system plate, radius and
+  shadow.
 
 ### 0.7.0
 

@@ -248,7 +248,7 @@ input:focus-visible {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: #000000;
+  background: var(--ph-black-8, rgb(0 0 0));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
@@ -823,6 +823,10 @@ select.input option {
   --ig-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ig-leading: 18px;
   --ig-radius-control: 7px;
+  --ig-radius-card: 12px;
+  --ig-glass: rgba(255, 255, 255, 0.075);
+  --ig-popup-bg: var(--ph-glass-plate-strong, rgba(10, 10, 10, 0.86));
+  --ig-shadow-popup: 0 12px 34px rgba(0, 0, 0, 0.35);
 }
 
 .select {
