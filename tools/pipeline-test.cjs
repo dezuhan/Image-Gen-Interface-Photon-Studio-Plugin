@@ -97,20 +97,25 @@ function fakeApi(options) {
       allowEndpoint: async () => {},
       request: async (request) => {
         calls.push("request:" + request.url);
+        const jsonReply = (status, payload) => ({
+          status,
+          body: new TextEncoder().encode(JSON.stringify(payload)),
+          headers: {},
+        });
         if (request.url.includes("/v1/models/") && request.url.endsWith("/predictions")) {
-          return { status: 201, json: { id: "p1", status: "starting" } };
+          return jsonReply(201, { id: "p1", status: "starting" });
         }
         if (request.url.includes("/v1/predictions/p1")) {
           state.polls += 1;
-          if (config.failPrediction) return { status: 200, json: { id: "p1", status: "failed", error: "model exploded" } };
-          if (state.polls < (config.pollsUntilDone || 2)) return { status: 200, json: { id: "p1", status: "processing" } };
-          return { status: 200, json: { id: "p1", status: "succeeded", output: ["https://replicate.delivery/out.png"] } };
+          if (config.failPrediction) return jsonReply(200, { id: "p1", status: "failed", error: "model exploded" });
+          if (state.polls < (config.pollsUntilDone || 2)) return jsonReply(200, { id: "p1", status: "processing" });
+          return jsonReply(200, { id: "p1", status: "succeeded", output: ["https://replicate.delivery/out.png"] });
         }
         if (request.url.startsWith("https://replicate.delivery/")) {
           return { status: 200, body: new Uint8Array([9, 9, 9]) };
         }
         if (request.url.includes("example.com")) {
-          return { status: 200, json: { output: ["https://example.com/out.png"] } };
+          return jsonReply(200, { output: ["https://example.com/out.png"] });
         }
         throw new Error("unexpected request " + request.url);
       },
@@ -136,6 +141,14 @@ function replicateSettings(overrides) {
 
 const tests = [];
 const test = (name, fn) => tests.push([name, fn]);
+
+test("readJson decodes the SDK byte body", () => {
+  const reply = { status: 200, body: new TextEncoder().encode('{"id":"p1","status":"starting"}') };
+  assert.deepEqual(Pipeline.readJson(reply), { id: "p1", status: "starting" });
+  assert.equal(Pipeline.readJson({ status: 200, body: new Uint8Array() }), null);
+  assert.equal(Pipeline.readJson({ status: 200, body: new TextEncoder().encode("not json") }), null);
+  assert.equal(Pipeline.readJson({ status: 200, json: { id: "x" } }).id, "x");
+});
 
 /* ------------------------------------------------------------------ capture */
 

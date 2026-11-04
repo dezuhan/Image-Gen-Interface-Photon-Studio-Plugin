@@ -107,6 +107,34 @@
     return new Uint8Array(data.data.buffer.slice(0));
   }
 
+  /**
+   * Photon's network.request returns { status, body: Uint8Array, headers }; there is no `json`
+   * field. Decoding the body is what turns a prediction into { id, status, output }.
+   */
+  function readJson(reply) {
+    if (!reply) return null;
+    if (reply.json !== undefined) return reply.json;
+    const body = reply.body;
+    if (!body) return null;
+    const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
+    if (!bytes.length) return null;
+    try {
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      return null;
+    }
+  }
+
+  function readText(reply) {
+    if (!reply || !reply.body) return "";
+    const bytes = reply.body instanceof Uint8Array ? reply.body : new Uint8Array(reply.body);
+    try {
+      return new TextDecoder().decode(bytes).slice(0, 400);
+    } catch {
+      return "";
+    }
+  }
+
   async function ensureOrigin(api, url) {
     try {
       await api.network.allowEndpoint(new URL(url).origin);
@@ -245,9 +273,11 @@
     progress(0.45, "Submitting to Replicate…");
     const response = await api.network.request({ url: submit.url, ...submit.options });
     if (response.status < 200 || response.status >= 300) {
-      throw new Error("Replicate rejected the request (HTTP " + response.status + ")");
+      const detail = readText(response);
+      throw new Error("Replicate rejected the request (HTTP " + response.status + ")" + (detail ? ": " + detail : ""));
     }
-    let prediction = Providers.parsePrediction(response.json);
+    let prediction = Providers.parsePrediction(readJson(response));
+    if (!prediction.id) throw new Error("Replicate accepted the request but returned no prediction id.");
     const started = Date.now();
     while (prediction.status === "pending") {
       if (isCancelled()) throw new Error("cancelled by the user");
@@ -256,8 +286,11 @@
       if (isCancelled()) throw new Error("cancelled by the user");
       const poll = Providers.buildReplicatePoll({ base, id: prediction.id });
       const next = await api.network.request({ url: poll.url, ...poll.options });
-      if (next.status < 200 || next.status >= 300) throw new Error("Polling failed (HTTP " + next.status + ")");
-      prediction = Providers.parsePrediction(next.json);
+      if (next.status < 200 || next.status >= 300) {
+        const detail = readText(next);
+        throw new Error("Polling failed (HTTP " + next.status + ")" + (detail ? ": " + detail : ""));
+      }
+      prediction = Providers.parsePrediction(readJson(next));
       progress(0.5 + Math.min(0.35, ((Date.now() - started) / pollLimit) * 0.35), "Generating… " + (prediction.rawStatus || ""));
     }
     if (prediction.status === "failed") throw new Error(prediction.error || "The prediction failed.");
@@ -276,9 +309,10 @@
     progress(0.45, "Submitting to the endpoint…");
     const response = await api.network.request({ url: submit.url, ...submit.options });
     if (response.status < 200 || response.status >= 300) {
-      throw new Error("The endpoint rejected the request (HTTP " + response.status + ")");
+      const detail = readText(response);
+      throw new Error("The endpoint rejected the request (HTTP " + response.status + ")" + (detail ? ": " + detail : ""));
     }
-    let body = response.json;
+    let body = readJson(response);
     let parsed = Providers.parseCustomResponse(body, config);
     const started = Date.now();
     while (parsed.status === "pending") {
@@ -289,8 +323,11 @@
       const poll = Providers.buildCustomPoll({ config, id: parsed.id });
       if (!poll) throw new Error("The endpoint is asynchronous but no Poll URL is configured.");
       const next = await api.network.request({ url: poll.url, ...poll.options });
-      if (next.status < 200 || next.status >= 300) throw new Error("Polling failed (HTTP " + next.status + ")");
-      body = next.json;
+      if (next.status < 200 || next.status >= 300) {
+        const detail = readText(next);
+        throw new Error("Polling failed (HTTP " + next.status + ")" + (detail ? ": " + detail : ""));
+      }
+      body = readJson(next);
       parsed = Providers.parseCustomResponse(body, config);
       progress(0.5 + Math.min(0.35, ((Date.now() - started) / pollLimit) * 0.35), "Waiting for the endpoint…");
     }
@@ -424,6 +461,8 @@
     resizeRgba,
     encodeDataUri,
     downloadImage,
+    readJson,
+    readText,
     captureSource,
     generate,
     apply,

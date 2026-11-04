@@ -95,7 +95,7 @@ The panel keeps the last six results (prompt, size, thumbnail) for quick reuse.
 
 ## Verification status
 
-- **Tested headless:** 43 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
+- **Tested headless:** 44 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
   capture → submit → poll → download → apply sequence, the masked fallback, cancellation, failed
   predictions and template parsing.
 - **Not yet exercised against live Photon/Replicate in this repository.** The SDK behaviour above was
@@ -110,6 +110,15 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.1.1
+
+- **Fixed "Polling failed (HTTP 404)".** Photon's `network.request` answers with
+  `{ status, body: Uint8Array, headers }` — there is no `json` field, so the prediction id was read
+  as `null` and the poll hit `/v1/predictions/null`. Responses are now decoded from the byte body
+  (`readJson`), and a submit that returns no id fails with a clear message instead of polling `null`.
+- Non-2xx responses now include a snippet of the provider's body in the error (that is where
+  Replicate puts `{"detail": …}`).
 
 ### 0.1.0
 
