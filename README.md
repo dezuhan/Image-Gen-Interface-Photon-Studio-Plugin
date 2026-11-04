@@ -162,6 +162,12 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 
 ## Changelog
 
+### 0.7.3
+
+- Footer follows the shared plugin pattern: version on the left, `Details` and `Check service`
+  on the right. Details shows the plugin log; Check service reports document/layer and provider
+  readiness in the same log.
+
 ### 0.7.2
 
 - Tabs now use the canonical `tabs.js` slider: the active plate moves with a 220 ms standard

@@ -72,6 +72,11 @@ const el = {
   log: document.getElementById("log"),
   status: document.getElementById("status"),
   meta: document.getElementById("meta"),
+  detailsBtn: document.getElementById("detailsBtn"),
+  serviceBtn: document.getElementById("serviceBtn"),
+  detailsOverlay: document.getElementById("detailsOverlay"),
+  detailsClose: document.getElementById("detailsClose"),
+  detailsLog: document.getElementById("detailsLog"),
 };
 
 const SETTINGS_KEY = "imagegen";
@@ -91,6 +96,43 @@ const imageCache = new Map(); // history id → { image, placement }, session on
 function log(line) {
   const stamp = new Date().toLocaleTimeString();
   el.log.textContent = ("[" + stamp + "] " + line + "\n" + el.log.textContent).slice(0, 8000);
+}
+
+function openDetails() {
+  el.detailsLog.textContent = el.log.textContent || "No log yet.";
+  el.detailsOverlay.hidden = false;
+}
+
+function wireFooter() {
+  el.detailsBtn.addEventListener("click", openDetails);
+  el.serviceBtn.addEventListener("click", () => void checkService());
+  el.detailsClose.addEventListener("click", () => (el.detailsOverlay.hidden = true));
+  el.detailsOverlay.addEventListener("click", (event) => {
+    if (event.target === el.detailsOverlay) el.detailsOverlay.hidden = true;
+  });
+}
+
+async function checkService() {
+  log("check service…");
+  if (!api) {
+    log("SDK: unavailable — open the panel inside Photon Studio.");
+  } else {
+    try {
+      const active = await api.documents.active();
+      if (!active) log("document: none open");
+      else {
+        log(
+          "document: " + (active.title || active.id) + " · " + (active.layers || []).length +
+            " layer(s) · " + (active.selectedLayerIds || []).length + " selected",
+        );
+      }
+      log("provider: " + settings.provider + " · " + settings.models.length + " saved model(s)");
+    } catch (error) {
+      log("check failed: " + String((error && error.message) || error));
+    }
+  }
+  el.detailsLog.textContent = el.log.textContent || "No log yet.";
+  el.detailsOverlay.hidden = false;
 }
 
 function setStatus(text) {
@@ -744,6 +786,7 @@ function showMode(mode) {
 }
 
 function wire() {
+  wireFooter();
   el.tabGenerate.addEventListener("click", () => showMode("generate"));
   el.tabHistory.addEventListener("click", () => showMode("history"));
   el.tabSettings.addEventListener("click", () => showMode("settings"));
