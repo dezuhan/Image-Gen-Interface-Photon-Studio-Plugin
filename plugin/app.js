@@ -314,7 +314,6 @@ function writeSettingsToUi() {
   el.margin.value = String(settings.margin);
   el.seed.value = "";
   el.baseUrl.value = settings.baseUrl || "";
-  el.custom.submitUrl = settings.custom.submitUrl || "";
   el.submitUrl.value = settings.custom.submitUrl;
   el.method.value = settings.custom.method || "POST";
   el.mode.value = settings.custom.mode || "immediate";

@@ -141,10 +141,20 @@ same layout as the Upscale panel.
 node tools/core-test.cjs        # 16 tests: masks, bounds, sizes, templates, parsing
 node tools/providers-test.cjs   # 21 tests: Replicate, schema parsing, custom adapters
 node tools/pipeline-test.cjs    # 21 tests: full flow with a fake SDK, schema-driven payloads
+node tools/ui-check.cjs         # every element id / key used by app.js exists
 node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.5.1
+
+- **Fixed `init failed: Cannot set properties of undefined (setting 'submitUrl')`** — a leftover
+  `el.custom…` assignment from the removed source-mode UI ran before the panel finished loading.
+- Added `tools/ui-check.cjs`, a static check that every `getElementById` id exists in `index.html`
+  and every `el.<key>` exists in the element table, so this class of crash fails tests instead of the
+  panel.
+- Tests: 58 + UI check.
 
 ### 0.5.0
 
