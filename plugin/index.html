@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Image Gen</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="panel-head">
+        <h1 class="title">Image Gen</h1>
+        <span id="state" class="state">Idle</span>
+        <span id="sep" class="sep" aria-hidden="true">·</span>
+        <span id="badge" class="badge ok">Ready</span>
+      </header>
+
+      <div class="tabs" role="tablist">
+        <button id="tabGenerate" class="tab active" type="button" role="tab">Generate</button>
+        <button id="tabSettings" class="tab" type="button" role="tab">Settings</button>
+      </div>
+
+      <section id="viewGenerate" class="view">
+        <div class="chip-row">
+          <span class="tag" id="sourceTag">Selection</span>
+          <strong id="sourceLabel">Nothing selected</strong>
+        </div>
+
+        <textarea id="prompt" class="prompt" placeholder="Describe what to generate inside the selection…"></textarea>
+
+        <div class="grid2">
+          <div class="field">
+            <label class="label" for="model">Model</label>
+            <input id="model" class="input" type="text" spellcheck="false" placeholder="owner/name or owner/name:version" />
+          </div>
+          <div class="field">
+            <label class="label" for="size">Work size</label>
+            <span class="select">
+              <select id="size">
+                <option value="auto" selected>Auto from selection</option>
+                <option value="512">512 px</option>
+                <option value="768">768 px</option>
+                <option value="1024">1024 px</option>
+                <option value="1536">1536 px</option>
+              </select>
+              <span class="chevron" aria-hidden="true"></span>
+            </span>
+          </div>
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="grid3">
+            <div class="field">
+              <label class="label" for="steps">Steps</label>
+              <input id="steps" class="input" type="number" min="1" max="100" step="1" value="28" />
+            </div>
+            <div class="field">
+              <label class="label" for="guidance">Guidance</label>
+              <input id="guidance" class="input" type="number" min="0" max="20" step="0.5" value="3.5" />
+            </div>
+            <div class="field">
+              <label class="label" for="seed">Seed</label>
+              <input id="seed" class="input" type="number" min="0" step="1" placeholder="random" />
+            </div>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label class="label" for="margin">Margin (px)</label>
+              <input id="margin" class="input" type="number" min="0" max="256" step="1" value="0" />
+            </div>
+            <div class="field">
+              <label class="label" for="strength">Strength</label>
+              <input id="strength" class="input" type="number" min="0.1" max="1" step="0.05" value="0.9" />
+            </div>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button id="generate" class="button primary" type="button">Generate</button>
+          <button id="cancel" class="button cancel" type="button" hidden>Cancel</button>
+        </div>
+
+        <div id="progress" class="progress" hidden><div id="progressFill" class="progress-fill"></div></div>
+        <p id="reason" class="hint">Select an area in Photon, describe it, then Generate.</p>
+
+        <div class="preview" id="preview">
+          <span id="previewEmpty" class="preview-empty">The generated image appears here.</span>
+          <canvas id="previewCanvas" hidden></canvas>
+        </div>
+
+        <div class="actions">
+          <button id="apply" class="button primary" type="button" hidden>Apply</button>
+          <button id="discard" class="button quiet" type="button" hidden>Discard</button>
+        </div>
+
+        <details id="historyBox" class="advanced" hidden>
+          <summary>Recent</summary>
+          <div id="history" class="history"></div>
+        </details>
+      </section>
+
+      <section id="viewSettings" class="view" hidden>
+        <div class="field">
+          <label class="label" for="provider">Provider</label>
+          <span class="select">
+            <select id="provider">
+              <option value="replicate" selected>Replicate</option>
+              <option value="custom">Custom endpoint</option>
+            </select>
+            <span class="chevron" aria-hidden="true"></span>
+          </span>
+          <p id="providerHint" class="hint">Paste a token from replicate.com/account/api-tokens</p>
+        </div>
+
+        <div class="field" id="baseUrlField">
+          <label class="label" for="baseUrl">Base URL</label>
+          <input id="baseUrl" class="input" type="text" spellcheck="false" placeholder="https://api.replicate.com" />
+        </div>
+
+        <div class="field">
+          <span class="label">API key</span>
+          <span id="keyState" class="hint">Not configured</span>
+        </div>
+        <div class="actions">
+          <button id="setKey" class="button small" type="button">Set key</button>
+          <button id="forgetKey" class="button small" type="button" hidden>Forget</button>
+        </div>
+
+        <div id="customFields" hidden>
+          <div class="field">
+            <label class="label" for="submitUrl">Submit URL</label>
+            <input id="submitUrl" class="input" type="text" spellcheck="false" placeholder="https://example.com/generate" />
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label class="label" for="method">Method</label>
+              <span class="select">
+                <select id="method">
+                  <option value="POST" selected>POST</option>
+                  <option value="GET">GET</option>
+                </select>
+                <span class="chevron" aria-hidden="true"></span>
+              </span>
+            </div>
+            <div class="field">
+              <label class="label" for="mode">Mode</label>
+              <span class="select">
+                <select id="mode">
+                  <option value="immediate" selected>Image in the response</option>
+                  <option value="poll">Poll until ready</option>
+                </select>
+                <span class="chevron" aria-hidden="true"></span>
+              </span>
+            </div>
+          </div>
+          <div class="field">
+            <label class="label" for="headersTemplate">Headers (JSON)</label>
+            <textarea id="headersTemplate" class="template" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label class="label" for="bodyTemplate">Body template (JSON)</label>
+            <textarea id="bodyTemplate" class="template" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <label class="label" for="imageSource">Image value</label>
+            <span class="select">
+              <select id="imageSource">
+                <option value="data_uri" selected>Data URI</option>
+                <option value="base64">Bare base64</option>
+                <option value="url">URL only</option>
+              </select>
+              <span class="chevron" aria-hidden="true"></span>
+            </span>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label class="label" for="pollUrl">Poll URL</label>
+              <input id="pollUrl" class="input" type="text" spellcheck="false" placeholder="https://example.com/jobs/{{id}}" />
+            </div>
+            <div class="field">
+              <label class="label" for="outputPath">Output path</label>
+              <input id="outputPath" class="input" type="text" spellcheck="false" placeholder="output" />
+            </div>
+          </div>
+          <div class="grid2">
+            <div class="field">
+              <label class="label" for="statusPath">Status path</label>
+              <input id="statusPath" class="input" type="text" spellcheck="false" placeholder="status" />
+            </div>
+            <div class="field">
+              <label class="label" for="successValues">Success values</label>
+              <input id="successValues" class="input" type="text" spellcheck="false" placeholder="succeeded,completed" />
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button id="save" class="button primary" type="button">Save</button>
+          <button id="test" class="button" type="button">Test connection</button>
+        </div>
+        <p id="testResult" class="hint"></p>
+        <pre id="log" class="log"></pre>
+      </section>
+
+      <footer class="panel-footer">
+        <span id="status">ready</span>
+        <span id="meta" class="hint"></span>
+      </footer>
+    </main>
+
+    <script src="select.js"></script>
+    <script src="core.js"></script>
+    <script src="providers.js"></script>
+    <script src="pipeline.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+{
+  "manifestVersion": 1,
+  "sdkVersion": 1,
+  "id": "photon-image-gen",
+  "name": "Image Gen",
+  "version": "0.1.0",
+  "main": "index.html",
+  "panels": [
+    {
+      "id": "imagegen",
+      "label": "Image Gen",
+      "ui": "custom",
+      "minimumSize": {
+        "width": 380,
+        "height": 600
+      }
+    }
+  ],
+  "commands": [
+    {
+      "id": "imagegen.open",
+      "label": "Image Gen…",
+      "scope": "document",
+      "panel": "imagegen",
+      "menu": "Plugins",
+      "binding": "Ctrl+Shift+G",
+      "keywords": [
+        "generate",
+        "image",
+        "inpaint",
+        "fill",
+        "replicate",
+        "ai"
+      ]
+    }
+  ],
+  "permissions": {
+    "document": "readWrite",
+    "credentials": true,
+    "customEndpoints": true,
+    "network": [
+      "https://api.replicate.com",
+      "https://replicate.delivery"
+    ],
+    "credentialOrigins": {
+      "https://api.replicate.com": [
+        "https://api.replicate.com",
+        "https://replicate.delivery"
+      ]
+    }
+  }
+}
