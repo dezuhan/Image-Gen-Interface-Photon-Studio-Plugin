@@ -97,6 +97,7 @@ function fakeApi(options) {
       allowEndpoint: async () => {},
       request: async (request) => {
         calls.push("request:" + request.url);
+        if (request.json && request.json.input) api.lastSubmit = request.json;
         // Photon parses JSON responses unless response:"bytes" is requested, so `body` is an object.
         // The config flags keep the other build shapes covered too.
         const jsonReply = (status, payload) => ({
@@ -461,6 +462,18 @@ test("generate also works when the host hands back the JSON as bytes", async () 
     pollMs: 1,
   });
   assert.equal(generated.image.width, 64);
+});
+
+
+test("generate sends the nano-banana schema when that model is chosen", async () => {
+  const api = fakeApi({});
+  const settings = replicateSettings({ model: "google/nano-banana-2" });
+  const source = await Pipeline.captureSource({ api, settings });
+  await Pipeline.generate({ api, settings, source, prompt: "put a lamp here", seed: 5, pollMs: 1 });
+  const submit = api.lastSubmit;
+  assert.ok(submit, "submit request captured");
+  assert.deepEqual(Object.keys(submit.input).sort(), ["image_input", "match_input_image", "output_format", "prompt", "seed"]);
+  assert.equal(submit.input.mask, undefined);
 });
 
 (async () => {

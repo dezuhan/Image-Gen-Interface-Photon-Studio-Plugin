@@ -39,6 +39,7 @@
   };
 
   const MODEL_PRESETS = [
+    { id: "google/nano-banana-2", label: "Nano Banana 2 — edit & generate (default)" },
     { id: "black-forest-labs/flux-fill-dev", label: "FLUX Fill Dev — inpainting" },
     { id: "black-forest-labs/flux-dev", label: "FLUX Dev — image to image" },
     { id: "black-forest-labs/flux-schnell", label: "FLUX Schnell — fast text to image" },
@@ -84,8 +85,31 @@
     return { owner, name, version: null, spec: text };
   }
 
-  /** Replicate input object; key names follow the common image-model schemas. */
+  /** Nano Banana models take reference images instead of a masked inpainting input. */
+  function modelFamily(model) {
+    const spec = String(model || "");
+    if (/nano-?banana/i.test(spec)) return "nano-banana";
+    return "standard";
+  }
+
+  function supportsMask(model) {
+    return modelFamily(model) === "standard";
+  }
+
+  /** Replicate input object; key names follow each model's published schema. */
+
   function replicateInput(request) {
+    if (modelFamily(request.model) === "nano-banana") {
+      // Schema: prompt, image_input (max 14 URIs), aspect_ratio, match_input_image, output_format, seed.
+      // No mask, steps or guidance — sending them would be rejected by the model validator.
+      const input = { prompt: request.prompt, output_format: "png" };
+      if (request.image) {
+        input.image_input = [request.image];
+        input.match_input_image = true;
+      }
+      if (request.seed !== null && request.seed !== undefined && request.seed !== "") input.seed = Number(request.seed);
+      return input;
+    }
     const input = { prompt: request.prompt };
     if (request.image) input.image = request.image;
     if (request.mask) input.mask = request.mask;
@@ -276,6 +300,8 @@
     providerInfo,
     credentialRef,
     parseModelSpec,
+    modelFamily,
+    supportsMask,
     replicateInput,
     buildReplicateRequest,
     buildReplicatePoll,

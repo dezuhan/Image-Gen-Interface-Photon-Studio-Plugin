@@ -414,18 +414,21 @@
       : Number(settings.size) || Core.WORK_SIZES[2];
     const plan = Core.planSize(source.width, source.height, targetSize, Core.MAX_PIXELS);
     const baseImage = resizeRgba(source.pixels, source.width, source.height, plan.width, plan.height);
-    const maskImage = Core.scaleMask(source.mask, source.maskWidth, source.maskHeight, plan.width, plan.height);
+    const sendMask = settings.provider === "custom" || Providers.supportsMask(settings.model);
+    const maskImage = sendMask
+      ? Core.scaleMask(source.mask, source.maskWidth, source.maskHeight, plan.width, plan.height)
+      : null;
 
     progress(0.22, "Encoding…");
     const imageUri = await encodeDataUri(api, plan.width, plan.height, baseImage);
-    const maskUri = await encodeDataUri(api, plan.width, plan.height, maskImage);
+    const maskUri = maskImage ? await encodeDataUri(api, plan.width, plan.height, maskImage) : null;
     const bare = imageUri.split(",").pop();
-    const bareMask = maskUri.split(",").pop();
+    const bareMask = maskUri ? maskUri.split(",").pop() : null;
     const payload = {
       model: settings.model,
       prompt: options.prompt,
       image: settings.custom && settings.custom.imageSource === "base64" ? bare : imageUri,
-      mask: settings.custom && settings.custom.imageSource === "base64" ? bareMask : maskUri,
+      mask: maskUri ? (settings.custom && settings.custom.imageSource === "base64" ? bareMask : maskUri) : null,
       width: plan.width,
       height: plan.height,
       seed: options.seed,

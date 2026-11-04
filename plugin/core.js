@@ -15,7 +15,7 @@
   const DEFAULTS = {
     provider: "replicate",
     source: "selection",
-    model: "black-forest-labs/flux-fill-dev",
+    model: "google/nano-banana-2",
     size: "auto",
     steps: 28,
     guidance: 3.5,

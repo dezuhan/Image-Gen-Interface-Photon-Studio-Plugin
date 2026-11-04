@@ -188,6 +188,41 @@ test("provider registry exposes the two providers and presets", () => {
   assert.equal(Providers.credentialRef("custom"), null);
 });
 
+
+test("nano-banana input uses image_input and never sends a mask", () => {
+  const input = Providers.replicateInput({
+    model: "google/nano-banana-2",
+    prompt: "replace the sky with sunrise",
+    image: "data:image/png;base64,AAA",
+    mask: "data:image/png;base64,BBB",
+    steps: 40,
+    guidance: 7,
+    strength: 0.5,
+    seed: 12,
+  });
+  assert.deepEqual(input.image_input, ["data:image/png;base64,AAA"]);
+  assert.equal(input.mask, undefined);
+  assert.equal(input.num_inference_steps, undefined);
+  assert.equal(input.guidance, undefined);
+  assert.equal(input.strength, undefined);
+  assert.equal(input.match_input_image, true);
+  assert.equal(input.output_format, "png");
+  assert.equal(input.seed, 12);
+});
+
+test("nano-banana text to image omits image_input", () => {
+  const input = Providers.replicateInput({ model: "google/nano-banana-2", prompt: "a red fox" });
+  assert.deepEqual(input, { prompt: "a red fox", output_format: "png" });
+});
+
+test("model families expose mask support", () => {
+  assert.equal(Providers.modelFamily("google/nano-banana-2"), "nano-banana");
+  assert.equal(Providers.modelFamily("google/nano-banana-pro"), "nano-banana");
+  assert.equal(Providers.modelFamily("black-forest-labs/flux-fill-dev"), "standard");
+  assert.equal(Providers.supportsMask("google/nano-banana-2"), false);
+  assert.equal(Providers.supportsMask("black-forest-labs/flux-fill-dev"), true);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

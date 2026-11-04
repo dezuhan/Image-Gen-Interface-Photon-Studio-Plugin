@@ -25,6 +25,7 @@ const el = {
   sourceLabel: document.getElementById("sourceLabel"),
   prompt: document.getElementById("prompt"),
   model: document.getElementById("model"),
+  modelHint: document.getElementById("modelHint"),
   size: document.getElementById("size"),
   steps: document.getElementById("steps"),
   guidance: document.getElementById("guidance"),
@@ -154,6 +155,8 @@ async function loadSettings() {
   settings = { ...defaultSettings(), ...(stored || {}) };
   settings.custom = { ...Providers.CUSTOM_DEFAULTS, ...((stored && stored.custom) || {}) };
   settings.history = Array.isArray(settings.history) ? settings.history.slice(0, 6) : [];
+  // 0.3.0 moved the default to Nano Banana 2; drop the old default so upgrades follow.
+  if (settings.model === "black-forest-labs/flux-fill-dev") settings.model = Core.DEFAULTS.model;
 }
 
 async function persist() {
@@ -195,6 +198,7 @@ function writeSettingsToUi() {
   el.source.value = settings.source === "layer" ? "layer" : "selection";
   el.provider.value = settings.provider;
   el.model.value = settings.model;
+  updateModelHint();
   el.baseUrl.value = settings.baseUrl || "";
   el.size.value = settings.size || "auto";
   el.steps.value = String(settings.steps);
@@ -500,6 +504,16 @@ async function testConnection() {
 
 /* ---------- source chip & wiring ---------- */
 
+function updateModelHint() {
+  const model = el.model.value.trim();
+  if (Providers.modelFamily(model) === "nano-banana") {
+    el.modelHint.textContent =
+      "Nano Banana has no mask or step controls: the prompt edits the reference image and Photon clips the result to the selection.";
+  } else {
+    el.modelHint.textContent = "Mask, steps and guidance are sent when the model supports them.";
+  }
+}
+
 async function refreshSourceChip() {
   try {
     const doc = await api.documents.active();
@@ -566,6 +580,8 @@ function wire() {
     void refreshSourceChip();
     void persist();
   });
+  el.model.addEventListener("input", updateModelHint);
+  el.model.addEventListener("change", updateModelHint);
   el.prompt.addEventListener("input", () => {
     el.reason.textContent = el.prompt.value.trim()
       ? "Ready to generate inside " + (el.sourceTag.textContent === "Selection" ? "the selection" : "the layer") + "."

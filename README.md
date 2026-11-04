@@ -52,12 +52,17 @@ lands as a new layer aligned to the layer's bounds.
 
 ### Replicate
 
+- **Default: `google/nano-banana-2`** (Gemini 3.1 Flash Image). Its schema takes `prompt`,
+  `image_input` (up to 14 reference images), `aspect_ratio`, `match_input_image`, `output_format`
+  and `seed`; it has **no mask or step controls**, so the plugin sends the selected crop as the
+  reference image and Photon clips the returned image to the selection.
 - Model field accepts `owner/name` (official models) or `owner/name:version` (pinned community
-  version).
+  version). Masks, steps and guidance are only sent for models that declare them (e.g. FLUX Fill).
 - Submit uses `Prefer: wait=60`, then polls `GET /v1/predictions/{id}` every 1.5 s (max 180 s); the
   output URL is downloaded as bytes.
-- Suggested models: `black-forest-labs/flux-fill-dev` (inpainting),
-  `black-forest-labs/flux-dev` (image to image), `stability-ai/stable-diffusion-inpainting`.
+- Other presets: `black-forest-labs/flux-fill-dev` (inpainting with a mask),
+  `black-forest-labs/flux-dev` (image to image), `black-forest-labs/flux-schnell` (fast text to
+  image).
 - The API key is stored in Photon's credential vault and sent as `Authorization: Bearer …`; it is
   never written to plugin settings or logs.
 
@@ -85,7 +90,7 @@ Placeholders are JSON-escaped, so prompts with quotes cannot break the template.
 | Prompt | up to 2 000 chars | What to generate inside the selection |
 | Model | text | `owner/name[:version]` for Replicate, free text for custom |
 | Work size | Auto / 512 / 768 / 1024 / 1536 | Size sent to the provider; the result is scaled back to the selection |
-| Steps / Guidance | — | Passed to providers that support them |
+| Steps / Guidance | — | Passed only to models that declare them (ignored by Nano Banana) |
 | Seed | empty = random | Reproducibility |
 | Margin (px) | 0–256 | Grows the capture rectangle around the selection for context |
 | Strength | 0.1–1 | Image-to-image strength where supported |
@@ -123,6 +128,18 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.3.0
+
+- **Default model is now `google/nano-banana-2`**, built against its published schema:
+  `prompt` + `image_input` (array, up to 14 reference images) + `match_input_image` +
+  `output_format: png` + `seed`. Mask/steps/guidance/strength are no longer sent to it, so Replicate
+  validation passes; selection edits work by sending the selected crop and letting Photon clip the
+  result through the capture coverage.
+- Model-aware input builder (`modelFamily` / `supportsMask`); the mask is only encoded and uploaded
+  for models that accept it.
+- Upgrade migration: a stored old default (`black-forest-labs/flux-fill-dev`) becomes Nano Banana 2.
+- Tests: 55.
 
 ### 0.2.0
 
