@@ -111,6 +111,16 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 
 ## Changelog
 
+### 0.1.3
+
+- **Root cause of the empty submit body.** Photon's `network.request` already JSON-parses the reply
+  unless `response: "bytes"` is requested, so `reply.body` is a **parsed object** — not bytes and not
+  text. `readJson` now returns that object directly and still tolerates string/ArrayBuffer/typed-view
+  bodies from other builds.
+- Error previews show the body shape (`parsed JSON`, `N bytes`, `no body`) plus the raw JSON, so a
+  provider response is never described as "empty" when it is actually parsed.
+- Tests: 49.
+
 ### 0.1.2
 
 - **Body decoding accepts every shape Photon may hand back**: `Uint8Array`, `ArrayBuffer`, a typed

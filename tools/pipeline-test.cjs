@@ -97,10 +97,15 @@ function fakeApi(options) {
       allowEndpoint: async () => {},
       request: async (request) => {
         calls.push("request:" + request.url);
+        // Photon parses JSON responses unless response:"bytes" is requested, so `body` is an object.
+        // The config flags keep the other build shapes covered too.
         const jsonReply = (status, payload) => ({
           status,
-          // config.stringBody simulates a host that hands JSON back as text instead of bytes
-          body: config.stringBody ? JSON.stringify(payload) : new TextEncoder().encode(JSON.stringify(payload)),
+          body: config.stringBody
+            ? JSON.stringify(payload)
+            : config.byteBody
+              ? new TextEncoder().encode(JSON.stringify(payload))
+              : payload,
           headers: { "content-type": "application/json" },
         });
         if (request.url.includes("/v1/models/") && request.url.endsWith("/predictions")) {
@@ -396,6 +401,31 @@ test("a submit without an id fails with the body in the message and logs the res
     /no prediction id .*Submit body/i,
   );
   assert.ok(lines.some((line) => line.startsWith("submit HTTP 201")), "the submit response is logged");
+});
+
+
+test("readJson returns the already-parsed object Photon puts in body", () => {
+  assert.deepEqual(Pipeline.readJson({ status: 200, body: { id: "p1", status: "starting" } }), {
+    id: "p1",
+    status: "starting",
+  });
+  assert.deepEqual(Pipeline.readJson({ status: 200, body: { id: "p2" } }).id, "p2");
+  assert.equal(Pipeline.readJson({ status: 200, body: null }), null);
+  assert.equal(Pipeline.readJson({ status: 200 }), null);
+});
+
+test("generate also works when the host hands back the JSON as bytes", async () => {
+  const api = fakeApi({ byteBody: true });
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
+  const generated = await Pipeline.generate({
+    api,
+    settings: replicateSettings(),
+    source,
+    prompt: "a harbour at dawn",
+    seed: 2,
+    pollMs: 1,
+  });
+  assert.equal(generated.image.width, 64);
 });
 
 (async () => {

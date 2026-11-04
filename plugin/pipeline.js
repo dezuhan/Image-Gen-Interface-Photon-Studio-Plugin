@@ -108,29 +108,42 @@
   }
 
   /**
-   * Photon's network.request returns { status, body, headers }. Depending on the build, `body` can
-   * be a Uint8Array, an ArrayBuffer, a typed-array view, or already-decoded text — the helpers below
-   * accept all of them, which is what keeps the prediction id readable.
+   * Photon's network.request already JSON-parses the body unless `response: "bytes"` was asked for:
+   *
+   *   body = a.response === "bytes" ? bytes : JSON.parse(bytes)
+   *
+   * So a JSON reply arrives as a plain object. The helpers below accept the object as-is and still
+   * tolerate the other shapes a build might hand back (string, ArrayBuffer, typed view).
    */
+  function isBinary(body) {
+    return body instanceof ArrayBuffer || ArrayBuffer.isView(body);
+  }
+
   function bodyToText(body) {
     if (body === null || body === undefined) return "";
     if (typeof body === "string") return body;
-    if (body instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(body));
-    if (ArrayBuffer.isView(body)) {
+    if (isBinary(body)) {
+      if (body instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(body));
       return new TextDecoder().decode(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
     }
-    if (typeof body === "object" && typeof body.text === "string") return body.text;
-    try {
-      return new TextDecoder().decode(new Uint8Array(body));
-    } catch {
-      return "";
+    if (typeof body === "object") {
+      try {
+        return JSON.stringify(body);
+      } catch {
+        return "";
+      }
     }
+    return String(body);
   }
 
   function readJson(reply) {
     if (!reply) return null;
-    if (reply.json !== undefined) return reply.json;
-    const text = bodyToText(reply.body).trim();
+    if (reply.json !== undefined && reply.json !== null) return reply.json;
+    const body = reply.body;
+    if (body === null || body === undefined) return null;
+    // The common case: the SDK already parsed the JSON and put the object in `body`.
+    if (typeof body === "object" && !isBinary(body)) return body;
+    const text = bodyToText(body).trim();
     if (!text) return null;
     try {
       return JSON.parse(text);
@@ -144,9 +157,17 @@
   }
 
   function preview(reply) {
-    const text = readText(reply);
+    const body = reply && reply.body;
+    const shape = body === null || body === undefined
+      ? "no body"
+      : isBinary(body)
+        ? body.byteLength + " bytes"
+        : typeof body === "object"
+          ? "parsed JSON"
+          : typeof body;
     const type = (reply && reply.headers && (reply.headers["content-type"] || reply.headers["Content-Type"])) || "";
-    return "HTTP " + (reply && reply.status) + (type ? " " + type : "") + (text ? " · " + text.slice(0, 200) : " · empty body");
+    const text = readText(reply);
+    return "HTTP " + (reply && reply.status) + (type ? " " + type : "") + " · " + shape + (text ? " · " + text.slice(0, 200) : "");
   }
 
   async function ensureOrigin(api, url) {
@@ -489,6 +510,7 @@
     readJson,
     readText,
     bodyToText,
+    isBinary,
     captureSource,
     generate,
     apply,
