@@ -13,7 +13,8 @@ written back **only inside the selection** as one undoable step.
 1. Photon Studio → **Preferences → Plug-ins → Install plugin** → select this repository's
    `plugin/` folder.
 2. Open the panel with **Plugins → Image Gen…** (`Ctrl+Shift+G`).
-3. In **Settings**, pick a provider, store the API key, then **Test connection**.
+3. In **Settings**, store the API key, add the models you use (each entry remembers its provider),
+   then **Test connection**.
 4. Back in **Generate**, make a selection (optional), write a prompt and press **Generate**, then
    **Apply**.
 
@@ -60,10 +61,15 @@ capture API:
 
 - **Default: `google/nano-banana-2`** (Gemini 3.1 Flash Image). Its schema takes `prompt`,
   `image_input` (up to 14 reference images), `aspect_ratio`, `match_input_image`, `output_format`
-  and `seed`; it has **no mask or step controls**, so the plugin sends the selected crop as the
-  reference image and Photon clips the returned image to the selection.
-- Model field accepts `owner/name` (official models) or `owner/name:version` (pinned community
-  version). Masks, steps and guidance are only sent for models that declare them (e.g. FLUX Fill).
+  and `seed`; it has no mask or step controls, so the plugin sends the layer + selection references
+  and Photon clips the returned image to the selection.
+- The plugin **reads each model's input schema** with the stored token
+  (`GET /v1/models/{owner}/{name}`) and only sends fields that model declares: reference images vs
+  `image`+`mask`, `num_inference_steps`/`steps`, `guidance`/`guidance_scale`, `strength`,
+  `temperature`, `aspect_ratio`, `resolution`, `output_format`, `seed`. When the schema cannot be
+  read it falls back to the model-family defaults.
+- Model names accept `owner/name` (official models) or `owner/name:version` (pinned community
+  version).
 - Submit uses `Prefer: wait=60`, then polls `GET /v1/predictions/{id}` every 1.5 s (max 180 s); the
   output URL is downloaded as bytes.
 - Other presets: `black-forest-labs/flux-fill-dev` (inpainting with a mask),
@@ -95,13 +101,18 @@ Placeholders are JSON-escaped, so prompts with quotes cannot break the template.
 | --- | --- | --- |
 | Prompt | up to 2 000 chars | What to generate inside the selection |
 | Model | text | `owner/name[:version]` for Replicate, free text for custom |
-| Work size | Auto / 512 / 768 / 1024 / 1536 | Size sent to the provider; the result is scaled back to the selection |
-| Steps / Guidance | — | Passed only to models that declare them (ignored by Nano Banana) |
+| Model | saved list | Picks a saved model; the provider follows the entry, so switching does not need a re-paste |
+| Work size | Auto / 1K / 2K / 4K | Reference encode size and, when the model declares it, the `resolution` input |
+| Aspect ratio | Auto or 1:1 … 21:9 | Sent when the model declares `aspect_ratio`; Auto keeps `match_input_image` |
+| Temperature | 0–2 | Sent only to models that declare `temperature` |
+| Steps / Guidance | — | Sent only to models that declare them (ignored by Nano Banana) |
 | Seed | empty = random | Reproducibility |
 | Margin (px) | 0–256 | Grows the capture rectangle around the selection for context |
 | Strength | 0.1–1 | Image-to-image strength where supported |
 
-The panel keeps the last six results (prompt, size, thumbnail) for quick reuse.
+The panel keeps the last six results (prompt, size, thumbnail) for quick reuse. Logs live in their
+own collapsible **Logs** section at the bottom of the panel (it opens automatically on errors), the
+same layout as the Upscale panel.
 
 ## Limits and failure modes
 
@@ -119,7 +130,7 @@ The panel keeps the last six results (prompt, size, thumbnail) for quick reuse.
 
 ## Verification status
 
-- **Tested headless:** 44 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
+- **Tested headless:** 58 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
   capture → submit → poll → download → apply sequence, the masked fallback, cancellation, failed
   predictions and template parsing.
 - **Not yet exercised against live Photon/Replicate in this repository.** The SDK behaviour above was
@@ -128,12 +139,27 @@ The panel keeps the last six results (prompt, size, thumbnail) for quick reuse.
 
 ```powershell
 node tools/core-test.cjs        # 16 tests: masks, bounds, sizes, templates, parsing
-node tools/providers-test.cjs   # 15 tests: Replicate and custom adapters
-node tools/pipeline-test.cjs    # 12 tests: full flow with a fake SDK
+node tools/providers-test.cjs   # 21 tests: Replicate, schema parsing, custom adapters
+node tools/pipeline-test.cjs    # 21 tests: full flow with a fake SDK, schema-driven payloads
 node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.5.0
+
+- **Saved model library.** Settings takes model names and stores them with their provider; the
+  Generate tab shows them in a dropdown, so switching model/provider needs no copy-paste.
+- **Schema-driven Replicate inputs.** The model's declared input set is fetched once and cached, then
+  used to decide every optional field (references vs mask, steps/guidance names, temperature,
+  aspect ratio, resolution). Unsupported controls are simply not sent.
+- **Work size 1K / 2K / 4K** (plus Auto) and a new **Aspect ratio** control; both map to the model's
+  `resolution` / `aspect_ratio` inputs when declared.
+- **Temperature** control in the Generate tab.
+- **Logs moved to their own collapsible section** below both tabs (auto-opens on failure), matching
+  the Upscale panel.
+- Removed the long model hint under the model field.
+- Tests: 58.
 
 ### 0.4.0
 

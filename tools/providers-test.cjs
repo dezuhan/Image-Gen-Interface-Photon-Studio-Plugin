@@ -227,6 +227,60 @@ test("model families expose mask support", () => {
   assert.equal(Providers.supportsMask("black-forest-labs/flux-fill-dev"), true);
 });
 
+
+test("schema properties decide which optional fields are sent", () => {
+  const schema = new Set(["prompt", "image_input", "match_input_image", "aspect_ratio", "resolution", "temperature", "output_format", "seed"]);
+  const input = Providers.replicateInput(
+    {
+      model: "google/nano-banana-2",
+      prompt: "x",
+      image: "data:1",
+      image2: "data:2",
+      steps: 30,
+      guidance: 5,
+      strength: 0.4,
+      temperature: 0.7,
+      aspectRatio: "16:9",
+      resolution: "2K",
+      seed: 9,
+    },
+    schema,
+  );
+  assert.equal(input.temperature, 0.7);
+  assert.equal(input.aspect_ratio, "16:9");
+  assert.equal(input.resolution, "2K");
+  assert.equal(input.match_input_image, false, "an explicit aspect ratio disables matching");
+  assert.equal(input.num_inference_steps, undefined, "the model does not declare steps");
+  assert.equal(input.guidance, undefined);
+  assert.equal(input.strength, undefined);
+  assert.equal(input.mask, undefined);
+});
+
+test("parseInputSchema reads the nested Replicate openapi document", () => {
+  const payload = {
+    latest_version: {
+      openapi_schema: {
+        components: {
+          schemas: {
+            Input: { properties: { prompt: {}, image_input: {}, aspect_ratio: {}, resolution: {}, temperature: {} } },
+          },
+        },
+      },
+    },
+  };
+  const props = Providers.parseInputSchema(payload);
+  assert.ok(props instanceof Set);
+  assert.deepEqual([...props].sort(), ["aspect_ratio", "image_input", "prompt", "resolution", "temperature"]);
+  assert.equal(Providers.parseInputSchema({}), null);
+});
+
+test("schemaRequest targets the model endpoint", () => {
+  const request = Providers.schemaRequest({ model: "google/nano-banana-2" });
+  assert.equal(request.url, "https://api.replicate.com/v1/models/google/nano-banana-2");
+  assert.equal(request.options.method, "GET");
+  assert.equal(request.options.credential.id, "replicate");
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

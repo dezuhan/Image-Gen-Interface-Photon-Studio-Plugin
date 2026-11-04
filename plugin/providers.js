@@ -1,15 +1,12 @@
 /*
  * Image Gen — provider adapters.
  *
- * Two providers, one interface: build the submit request, build the poll request (when the provider
- * is asynchronous), parse a response into { id, status, output, error }, and turn the output into an
- * image URL or data URI.
+ * Replicate requests are shaped from the model's own input schema (fetched with the stored token), so
+ * the panel only sends fields that model declares: image_input vs image+mask, steps/guidance names,
+ * temperature, aspect_ratio, resolution, output_format, seed. When the schema cannot be read the
+ * builder falls back to the model family defaults (Nano Banana references vs mask inpainting).
  *
- * Replicate: POST /v1/models/{owner}/{name}/predictions (official models) or POST /v1/predictions
- * with a version hash (community models), then GET /v1/predictions/{id}. The API key never touches
- * plugin settings: it is referenced through Photon's credential vault.
- *
- * Custom endpoint: user-supplied JSON body template, polling template and JSON paths.
+ * Custom endpoints keep the user-authored JSON template.
  */
 (function (root, factory) {
   const core = typeof module === "object" && module.exports ? require("./core.js") : root.PhotonImageGen;
@@ -39,12 +36,14 @@
   };
 
   const MODEL_PRESETS = [
-    { id: "google/nano-banana-2", label: "Nano Banana 2 — edit & generate (default)" },
+    { id: "google/nano-banana-2", label: "Nano Banana 2 — edit & generate" },
     { id: "black-forest-labs/flux-fill-dev", label: "FLUX Fill Dev — inpainting" },
     { id: "black-forest-labs/flux-dev", label: "FLUX Dev — image to image" },
     { id: "black-forest-labs/flux-schnell", label: "FLUX Schnell — fast text to image" },
     { id: "stability-ai/stable-diffusion-inpainting", label: "Stable Diffusion inpainting" },
   ];
+
+  const ASPECT_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"];
 
   const CUSTOM_DEFAULTS = {
     submitUrl: "",
@@ -96,52 +95,115 @@
     return modelFamily(model) === "standard";
   }
 
-  /** Replicate input object; key names follow each model's published schema. */
+  /* ---------- model input schema ---------- */
 
-  function replicateInput(request) {
-    if (modelFamily(request.model) === "nano-banana") {
-      // Schema: prompt, image_input (max 14 URIs), aspect_ratio, match_input_image, output_format, seed.
-      // No mask, steps or guidance — sending them would be rejected by the model validator.
-      const input = { prompt: request.prompt, output_format: "png" };
-      // Two references by default when a selection exists: [full layer for context, selected crop].
-      const references = [request.image, request.image2].filter(Boolean);
-      if (references.length) {
-        input.image_input = references;
-        input.match_input_image = true;
-      }
-      if (request.seed !== null && request.seed !== undefined && request.seed !== "") input.seed = Number(request.seed);
-      return input;
-    }
+  function schemaRequest(options) {
+    const base = String(options.base || PROVIDERS.replicate.base).replace(/\/+$/, "");
+    const spec = parseModelSpec(options.model);
+    return {
+      url: base + "/v1/models/" + spec.owner + "/" + spec.name,
+      options: { method: "GET", headers: {}, credential: PROVIDERS.replicate.credential },
+    };
+  }
+
+  /** Pull the input property names out of a /v1/models/{owner}/{name} response. */
+  function parseInputSchema(payload) {
+    const version = payload && payload.latest_version ? payload.latest_version : null;
+    const openapi = (version && version.openapi_schema) || (payload && payload.openapi_schema) || null;
+    if (!openapi) return null;
+    const schemas = openapi.components && openapi.components.schemas ? openapi.components.schemas : null;
+    if (!schemas) return null;
+    const names = Object.keys(schemas);
+    const inputName = names.find((name) => /^input$/i.test(name)) || names.find((name) => /input/i.test(name)) || names[0];
+    const properties = schemas[inputName] && schemas[inputName].properties;
+    if (!properties || typeof properties !== "object") return null;
+    const set = new Set(Object.keys(properties));
+    // Replicate commonly wraps the real inputs in a single "input" property.
+    const nested = properties.input && properties.input.properties;
+    if (nested && typeof nested === "object") return new Set(Object.keys(nested));
+    return set;
+  }
+
+  /**
+   * Build the Replicate `input` object.
+   * `properties` is the model's declared input set (null when unknown → family fallback).
+   */
+  function replicateInput(request, properties) {
+    const declared = properties instanceof Set ? properties : null;
+    const family = modelFamily(request.model);
+    const familyFallback = family === "nano-banana"
+      ? new Set(["prompt", "image_input", "match_input_image", "output_format", "seed", "aspect_ratio"])
+      : null;
+    const can = (name) => (declared ? declared.has(name) : familyFallback ? familyFallback.has(name) : true);
+
+    const references = [request.image, request.image2].filter(Boolean);
+    const wantsReferences = declared ? declared.has("image_input") : family === "nano-banana";
     const input = { prompt: request.prompt };
-    if (request.image) input.image = request.image;
-    if (request.mask) input.mask = request.mask;
-    if (request.seed !== null && request.seed !== undefined && request.seed !== "") input.seed = Number(request.seed);
-    if (Number.isFinite(request.steps)) input.num_inference_steps = Math.round(request.steps);
-    if (Number.isFinite(request.guidance)) input.guidance = request.guidance;
-    if (Number.isFinite(request.strength)) input.strength = request.strength;
-    if (request.aspectRatio) input.aspect_ratio = request.aspectRatio;
-    input.output_format = "png";
+
+    if (wantsReferences) {
+      if (can("image_input") && references.length) input.image_input = references;
+      if (can("match_input_image") && references.length) {
+        input.match_input_image = !request.aspectRatio || request.aspectRatio === "auto";
+      }
+    } else {
+      if (request.image && can("image")) input.image = request.image;
+      if (request.mask && can("mask")) input.mask = request.mask;
+    }
+
+    if (request.seed !== null && request.seed !== undefined && request.seed !== "" && can("seed")) {
+      input.seed = Number(request.seed);
+    }
+
+    const stepsKey = declared
+      ? declared.has("num_inference_steps") ? "num_inference_steps" : declared.has("steps") ? "steps" : null
+      : can("num_inference_steps") ? "num_inference_steps" : can("steps") ? "steps" : null;
+    if (stepsKey && Number.isFinite(request.steps)) input[stepsKey] = Math.round(request.steps);
+
+    const guidanceKey = declared
+      ? declared.has("guidance") ? "guidance" : declared.has("guidance_scale") ? "guidance_scale" : declared.has("cfg_scale") ? "cfg_scale" : null
+      : can("guidance") ? "guidance" : can("guidance_scale") ? "guidance_scale" : null;
+    if (guidanceKey && Number.isFinite(request.guidance)) input[guidanceKey] = request.guidance;
+
+    if (Number.isFinite(request.strength) && can("strength")) input.strength = request.strength;
+    if (Number.isFinite(request.temperature) && can("temperature")) input.temperature = request.temperature;
+
+    if (request.aspectRatio && request.aspectRatio !== "auto" && can("aspect_ratio")) {
+      input.aspect_ratio = request.aspectRatio;
+    }
+    if (request.resolution && can("resolution")) input.resolution = request.resolution;
+
+    if (can("output_format")) input.output_format = "png";
     return input;
   }
 
   function buildReplicateRequest(options) {
     const base = String(options.base || PROVIDERS.replicate.base).replace(/\/+$/, "");
     const spec = parseModelSpec(options.model);
-    const input = replicateInput(options);
+    const input = replicateInput(options, options.properties);
     const headers = { Prefer: "wait=60" };
     if (spec.version) {
       return {
         provider: "replicate",
         mode: "prediction",
         url: base + "/v1/predictions",
-        options: { method: "POST", json: { version: spec.version, input }, headers, credential: PROVIDERS.replicate.credential },
+        options: {
+          method: "POST",
+          json: { version: spec.version, input },
+          headers,
+          credential: PROVIDERS.replicate.credential,
+        },
       };
     }
     return {
       provider: "replicate",
       mode: "prediction",
       url: base + "/v1/models/" + spec.owner + "/" + spec.name + "/predictions",
-      options: { method: "POST", json: { input }, headers, credential: PROVIDERS.replicate.credential },
+      options: {
+        method: "POST",
+        json: { input },
+        headers,
+        credential: PROVIDERS.replicate.credential,
+      },
     };
   }
 
@@ -169,11 +231,15 @@
     if (!output) return [];
     if (typeof output === "string") return [output];
     if (Array.isArray(output)) {
-      return output.filter((item) => typeof item === "string" || (item && typeof item.url === "string")).map((item) => (typeof item === "string" ? item : item.url));
+      return output
+        .filter((item) => typeof item === "string" || (item && typeof item.url === "string"))
+        .map((item) => (typeof item === "string" ? item : item.url));
     }
     if (typeof output === "object" && typeof output.url === "string") return [output.url];
     return [];
   }
+
+  /* ---------- custom endpoint ---------- */
 
   function buildCustomRequest(options) {
     const config = { ...CUSTOM_DEFAULTS, ...(options.config || {}) };
@@ -197,7 +263,7 @@
     let json;
     try {
       json = Core.parseJsonTemplate(config.bodyTemplate, vars);
-    } catch (error) {
+    } catch {
       throw new Error("Body template is not valid JSON after the placeholders were filled in.");
     }
     return {
@@ -219,15 +285,9 @@
     if (!config.pollUrl || !options.id) return null;
     const url = Core.renderTemplate(config.pollUrl, { id: options.id });
     if (!/^https?:/i.test(url)) throw new Error("Poll URL must be an absolute http(s) URL.");
-    let headers = {};
-    try {
-      headers = config.headersTemplate ? JSON.parse(Core.renderTemplate(config.headersTemplate, { id: options.id })) : {};
-    } catch {
-      headers = {};
-    }
     return {
       url,
-      options: { method: "GET", headers, ...(config.useCredential ? { credential: PROVIDERS.custom.credential } : {}) },
+      options: { method: "GET", headers: {}, ...(config.useCredential ? { credential: PROVIDERS.custom.credential } : {}) },
     };
   }
 
@@ -261,9 +321,16 @@
     const configOutput = config ? Core.getPath(body, config.outputPath || "output") : undefined;
     if (configOutput !== undefined) candidates.push(configOutput);
     candidates.push(body.output, body.image, body.url, body.data, body.images, body.result);
-    const direct = Core.firstImageCandidate(body, ["output", "image", "url", "images[0].url", "data[0].url", "data[0].b64_json", "result.url"]);
+    const direct = Core.firstImageCandidate(body, [
+      "output",
+      "image",
+      "url",
+      "images[0].url",
+      "data[0].url",
+      "data[0].b64_json",
+      "result.url",
+    ]);
     if (direct) {
-      // A bare base64 string from OpenAI-style payloads still needs the data URI wrapper.
       return /^https?:|^data:/i.test(direct) ? direct : Core.dataUri("image/png", direct);
     }
     for (const candidate of candidates) {
@@ -285,9 +352,7 @@
     if (!value) return null;
     if (/^https?:/i.test(value)) return { kind: "url", value };
     if (/^data:/i.test(value)) return { kind: "data", value };
-    if (imageSource === "base64" || !/^[A-Za-z0-9+/=\s]+$/.test(value) === false) {
-      return { kind: "data", value: Core.dataUri("image/png", value) };
-    }
+    if (imageSource === "base64") return { kind: "data", value: Core.dataUri("image/png", value) };
     return { kind: "data", value: Core.dataUri("image/png", value) };
   }
 
@@ -299,11 +364,14 @@
     PROVIDERS,
     MODEL_PRESETS,
     CUSTOM_DEFAULTS,
+    ASPECT_RATIOS,
     providerInfo,
     credentialRef,
     parseModelSpec,
     modelFamily,
     supportsMask,
+    schemaRequest,
+    parseInputSchema,
     replicateInput,
     buildReplicateRequest,
     buildReplicatePoll,

@@ -3,8 +3,8 @@
 /*
  * Image Gen panel — UI layer.
  *
- * All document work lives in pipeline.js (capture → generate → apply) and all provider knowledge in
- * providers.js; this file only reads the controls, draws the preview and keeps settings/history.
+ * All document work lives in pipeline.js (capture → generate → apply), provider knowledge in
+ * providers.js. This file wires the controls, the saved-model library, the preview and the logs.
  */
 
 const SDK = globalThis.__photonSdk;
@@ -24,8 +24,9 @@ const el = {
   sourceLabel: document.getElementById("sourceLabel"),
   prompt: document.getElementById("prompt"),
   model: document.getElementById("model"),
-  modelHint: document.getElementById("modelHint"),
   size: document.getElementById("size"),
+  aspect: document.getElementById("aspect"),
+  temperature: document.getElementById("temperature"),
   steps: document.getElementById("steps"),
   guidance: document.getElementById("guidance"),
   seed: document.getElementById("seed"),
@@ -47,6 +48,9 @@ const el = {
   providerHint: document.getElementById("providerHint"),
   baseUrlField: document.getElementById("baseUrlField"),
   baseUrl: document.getElementById("baseUrl"),
+  modelInput: document.getElementById("modelInput"),
+  addModel: document.getElementById("addModel"),
+  modelList: document.getElementById("modelList"),
   keyState: document.getElementById("keyState"),
   setKey: document.getElementById("setKey"),
   forgetKey: document.getElementById("forgetKey"),
@@ -64,12 +68,14 @@ const el = {
   save: document.getElementById("save"),
   test: document.getElementById("test"),
   testResult: document.getElementById("testResult"),
+  logsBox: document.getElementById("logsBox"),
   log: document.getElementById("log"),
   status: document.getElementById("status"),
   meta: document.getElementById("meta"),
 };
 
 const SETTINGS_KEY = "imagegen";
+const MODEL_SEPARATOR = "|";
 
 let api = null;
 let settings = null;
@@ -119,6 +125,16 @@ function errText(error) {
   return String((error && error.message) || error || "unknown error");
 }
 
+function fail(error) {
+  const message = Core.describeError(error);
+  el.reason.textContent = message;
+  el.logsBox.open = true;
+  setState("Error");
+  badge("Failed", "danger");
+  log("error: " + message);
+  return message;
+}
+
 function syncSelects() {
   if (typeof window !== "undefined" && typeof window.syncCustomSelects === "function") {
     window.syncCustomSelects();
@@ -133,13 +149,31 @@ function defaultSettings() {
     model: Core.DEFAULTS.model,
     baseUrl: "",
     size: "auto",
+    aspect: "auto",
+    temperature: 1,
     steps: Core.DEFAULTS.steps,
     guidance: Core.DEFAULTS.guidance,
     strength: Core.DEFAULTS.strength,
     margin: 0,
+    models: [{ provider: "replicate", model: Core.DEFAULTS.model }],
     custom: { ...Providers.CUSTOM_DEFAULTS },
     history: [],
   };
+}
+
+function uniqueModels(list) {
+  const seen = new Set();
+  const out = [];
+  for (const entry of Array.isArray(list) ? list : []) {
+    const provider = entry && entry.provider === "custom" ? "custom" : "replicate";
+    const model = String((entry && entry.model) || "").trim();
+    if (!model) continue;
+    const key = provider + MODEL_SEPARATOR + model;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ provider, model });
+  }
+  return out;
 }
 
 async function loadSettings() {
@@ -152,9 +186,19 @@ async function loadSettings() {
   }
   settings = { ...defaultSettings(), ...(stored || {}) };
   settings.custom = { ...Providers.CUSTOM_DEFAULTS, ...((stored && stored.custom) || {}) };
+  settings.models = uniqueModels(settings.models);
+  if (!settings.models.length) {
+    settings.models = [{ provider: settings.provider || "replicate", model: settings.model || Core.DEFAULTS.model }];
+  }
+  settings.model = String(settings.model || Core.DEFAULTS.model);
+  settings.provider = settings.models.some((entry) => entry.model === settings.model && entry.provider === settings.provider)
+    ? settings.provider
+    : settings.models[0].provider;
+  if (!settings.models.some((entry) => entry.model === settings.model)) settings.model = settings.models[0].model;
+  settings.temperature = Core.clamp(settings.temperature === undefined || settings.temperature === "" ? 1 : settings.temperature, 0, 2);
+  settings.size = ["auto", "1K", "2K", "4K"].includes(settings.size) ? settings.size : "auto";
+  settings.aspect = ["auto"].concat(Providers.ASPECT_RATIOS).includes(settings.aspect) ? settings.aspect : "auto";
   settings.history = Array.isArray(settings.history) ? settings.history.slice(0, 6) : [];
-  // 0.3.0 moved the default to Nano Banana 2; drop the old default so upgrades follow.
-  if (settings.model === "black-forest-labs/flux-fill-dev") settings.model = Core.DEFAULTS.model;
 }
 
 async function persist() {
@@ -167,11 +211,17 @@ async function persist() {
   }
 }
 
+function selectedEntry() {
+  return { provider: settings.provider === "custom" ? "custom" : "replicate", model: settings.model };
+}
+
 function readUiIntoSettings() {
   settings.provider = el.provider.value === "custom" ? "custom" : "replicate";
-  settings.model = el.model.value.trim() || Core.DEFAULTS.model;
+  settings.model = el.model.value || settings.model;
   settings.baseUrl = el.baseUrl.value.trim();
   settings.size = el.size.value || "auto";
+  settings.aspect = el.aspect.value || "auto";
+  settings.temperature = Core.clamp(el.temperature.value, 0, 2);
   settings.steps = Core.clamp(el.steps.value, 1, 100);
   settings.guidance = Core.clamp(el.guidance.value, 0, 20);
   settings.strength = Core.clamp(el.strength.value, 0.1, 1);
@@ -191,18 +241,81 @@ function readUiIntoSettings() {
   };
 }
 
+function rebuildModelSelect() {
+  el.model.textContent = "";
+  const entries = settings.models.length ? settings.models : [{ provider: "replicate", model: Core.DEFAULTS.model }];
+  for (const entry of entries) {
+    const option = document.createElement("option");
+    option.value = entry.provider + MODEL_SEPARATOR + entry.model;
+    option.textContent = entry.model + (entry.provider === "custom" ? " · custom" : "");
+    el.model.append(option);
+  }
+  const current = settings.provider + MODEL_SEPARATOR + settings.model;
+  el.model.value = entries.some((entry) => entry.provider + MODEL_SEPARATOR + entry.model === current)
+    ? current
+    : entries[0].provider + MODEL_SEPARATOR + entries[0].model;
+  syncSelects();
+}
+
+function rebuildAspectSelect() {
+  el.aspect.textContent = "";
+  const options = ["auto"].concat(Providers.ASPECT_RATIOS);
+  for (const value of options) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value === "auto" ? "Auto (match input)" : value;
+    el.aspect.append(option);
+  }
+  el.aspect.value = settings.aspect || "auto";
+}
+
+function renderModelList() {
+  el.modelList.textContent = "";
+  for (const entry of settings.models) {
+    const row = document.createElement("div");
+    row.className = "model-row";
+    const label = document.createElement("span");
+    label.className = "model-name";
+    label.textContent = entry.model;
+    label.title = entry.model;
+    const provider = document.createElement("span");
+    provider.className = "tag";
+    provider.textContent = entry.provider === "custom" ? "CUSTOM" : "REPLICATE";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "button tiny";
+    remove.textContent = "×";
+    remove.title = "Remove this model";
+    remove.addEventListener("click", () => {
+      settings.models = settings.models.filter((item) => !(item.model === entry.model && item.provider === entry.provider));
+      if (!settings.models.length) settings.models = [{ provider: "replicate", model: Core.DEFAULTS.model }];
+      if (settings.model === entry.model && settings.provider === entry.provider) {
+        settings.model = settings.models[0].model;
+        settings.provider = settings.models[0].provider;
+      }
+      rebuildModelSelect();
+      renderModelList();
+      void persist();
+    });
+    row.append(label, provider, remove);
+    el.modelList.append(row);
+  }
+}
+
 function writeSettingsToUi() {
   el.provider.value = settings.provider;
-  el.model.value = settings.model;
-  updateModelHint();
-  el.baseUrl.value = settings.baseUrl || "";
+  rebuildModelSelect();
+  rebuildAspectSelect();
   el.size.value = settings.size || "auto";
+  el.temperature.value = String(settings.temperature);
   el.steps.value = String(settings.steps);
   el.guidance.value = String(settings.guidance);
   el.strength.value = String(settings.strength);
   el.margin.value = String(settings.margin);
   el.seed.value = "";
-  el.submitUrl.value = settings.custom.submitUrl || "";
+  el.baseUrl.value = settings.baseUrl || "";
+  el.custom.submitUrl = settings.custom.submitUrl || "";
+  el.submitUrl.value = settings.custom.submitUrl;
   el.method.value = settings.custom.method || "POST";
   el.mode.value = settings.custom.mode || "immediate";
   el.headersTemplate.value = settings.custom.headersTemplate || "{}";
@@ -212,22 +325,21 @@ function writeSettingsToUi() {
   el.outputPath.value = settings.custom.outputPath || "output";
   el.statusPath.value = settings.custom.statusPath || "status";
   el.successValues.value = settings.custom.successValues || Providers.CUSTOM_DEFAULTS.successValues;
+  renderModelList();
   applyProviderUi();
   syncSelects();
 }
 
 function applyProviderUi() {
-  const custom = el.provider.value === "custom";
+  const custom = settings.provider === "custom";
   el.customFields.hidden = !custom;
   el.baseUrlField.hidden = custom;
-  el.providerHint.textContent = Providers.providerInfo(el.provider.value).hint;
-  el.model.placeholder = Providers.providerInfo(el.provider.value).modelHint;
-  renderHistory();
+  el.providerHint.textContent = Providers.providerInfo(settings.provider).hint;
   syncSelects();
 }
 
 async function refreshCredential() {
-  const id = el.provider.value === "custom" ? "custom" : "replicate";
+  const id = settings.provider === "custom" ? "custom" : "replicate";
   try {
     credential = await api.credentials.status(id);
   } catch {
@@ -318,12 +430,16 @@ function addHistory(current) {
 
 async function runGenerate() {
   if (busy || !settings) return;
+  readUiIntoSettings();
   const prompt = Core.truncate(el.prompt.value.trim(), 2000);
   if (!prompt) {
     el.reason.textContent = "Type a prompt first.";
     return;
   }
-  readUiIntoSettings();
+  if (!settings.model) {
+    el.reason.textContent = "Add a model in Settings first.";
+    return;
+  }
   cancelled = false;
   setBusy(true);
   badge("Working…", "busy");
@@ -338,16 +454,7 @@ async function runGenerate() {
     progress(0.08, "Capturing the source…");
     const source = await Pipeline.captureSource({ api, settings });
     const seed = el.seed.value === "" ? Math.floor(Math.random() * 1e9) : Number(el.seed.value);
-    const generated = await Pipeline.generate({
-      api,
-      settings,
-      source,
-      prompt,
-      seed,
-      progress,
-      isCancelled: () => cancelled,
-      log,
-    });
+    const generated = await Pipeline.generate({ api, settings, source, prompt, seed, progress, isCancelled: () => cancelled, log });
 
     result = {
       image: generated.image,
@@ -370,16 +477,13 @@ async function runGenerate() {
     el.reason.textContent =
       "Generated " + generated.providerImage.width + "×" + generated.providerImage.height +
       (generated.twoReferences ? " from 2 references (layer + selection)" : "") +
-      " for a " + source.width + "×" + source.height + " area. Apply writes it back.";
+      " · " + settings.size + " · " + settings.aspect + ". Apply writes it back.";
     el.apply.hidden = false;
     el.discard.hidden = false;
     el.meta.textContent = source.width + "×" + source.height + (source.hasSelection ? " selection" : " layer");
+    void persist();
   } catch (error) {
-    const message = Core.describeError(error);
-    el.reason.textContent = message;
-    setState("Error");
-    badge("Failed", "danger");
-    log("error: " + message);
+    fail(error);
   } finally {
     setBusy(false);
     progress(0);
@@ -405,11 +509,7 @@ async function applyResult() {
     log("applied via " + outcome.method);
     result = null;
   } catch (error) {
-    const message = Core.describeError(error);
-    el.reason.textContent = message;
-    setState("Error");
-    badge("Failed", "danger");
-    log("apply failed: " + message);
+    fail(error);
   } finally {
     setBusy(false);
     progress(0);
@@ -434,6 +534,28 @@ async function cancelRun() {
   log("cancel requested");
 }
 
+/* ---------- saved models ---------- */
+
+function addModelEntry() {
+  const model = el.modelInput.value.trim();
+  if (!model) {
+    el.testResult.textContent = "Type a model name first.";
+    return;
+  }
+  const provider = el.provider.value === "custom" ? "custom" : "replicate";
+  const key = provider + MODEL_SEPARATOR + model;
+  if (!settings.models.some((entry) => entry.provider + MODEL_SEPARATOR + entry.model === key)) {
+    settings.models.push({ provider, model });
+  }
+  settings.provider = provider;
+  settings.model = model;
+  rebuildModelSelect();
+  renderModelList();
+  el.modelInput.value = "";
+  el.testResult.textContent = "Model saved. Pick it in the Generate tab.";
+  void persist();
+}
+
 /* ---------- credentials & test ---------- */
 
 async function setKey() {
@@ -443,11 +565,7 @@ async function setKey() {
     : "https://api.replicate.com";
   try {
     await api.network.allowEndpoint(origin).catch(() => {});
-    await api.credentials.configure(
-      provider,
-      provider === "custom" ? "Custom endpoint API key" : "Replicate API token",
-      origin,
-    );
+    await api.credentials.configure(provider, provider === "custom" ? "Custom endpoint API key" : "Replicate API token", origin);
     await refreshCredential();
     el.testResult.textContent = "Key stored in the vault.";
   } catch (error) {
@@ -482,41 +600,28 @@ async function testConnection() {
       el.testResult.textContent = "Endpoint reachable (HTTP " + reply.status + ").";
       return;
     }
-    const spec = Providers.parseModelSpec(settings.model);
-    const base = (settings.baseUrl || Providers.PROVIDERS.replicate.base).replace(/\/+$/, "");
-    const url = base + "/v1/models/" + spec.owner + "/" + spec.name;
-    await api.network.allowEndpoint(new URL(url).origin).catch(() => {});
-    const reply = await api.network.request({
-      url,
-      method: "GET",
-      ...(credential && credential.configured ? { credential: Providers.PROVIDERS.replicate.credential } : {}),
-    });
+    const request = Providers.schemaRequest({ base: settings.baseUrl, model: settings.model });
+    await api.network.allowEndpoint(new URL(request.url).origin).catch(() => {});
+    const reply = await api.network.request({ url: request.url, ...request.options });
+    const props = reply.status === 200 ? Providers.parseInputSchema(Pipeline.readJson(reply)) : null;
     el.testResult.textContent = reply.status === 200
-      ? "Replicate reachable; " + spec.owner + "/" + spec.name + " is available."
+      ? "Connected. " + settings.model + (props ? " · " + props.size + " inputs" : " · schema not readable") + "."
       : "Replicate answered HTTP " + reply.status + " (check the token and model).";
+    log("test: " + el.testResult.textContent);
   } catch (error) {
     el.testResult.textContent = Core.describeError(error);
+    log("test failed: " + el.testResult.textContent);
   }
 }
 
 /* ---------- source chip & wiring ---------- */
 
-function updateModelHint() {
-  const model = el.model.value.trim();
-  if (Providers.modelFamily(model) === "nano-banana") {
-    el.modelHint.textContent =
-      "Nano Banana has no mask or step controls: the prompt edits the reference image and Photon clips the result to the selection.";
-  } else {
-    el.modelHint.textContent = "Mask, steps and guidance are sent when the model supports them.";
-  }
-}
-
 async function refreshSourceChip() {
   try {
     const doc = await api.documents.active();
     if (!doc) {
-      el.sourceTag.textContent = "No document";
-      el.sourceLabel.textContent = "Open a document";
+      el.sourceTag.textContent = "NO DOCUMENT";
+      el.sourceLabel.textContent = "Open an image to start";
       return;
     }
     const selected = Array.isArray(doc.selectedLayerIds) ? doc.selectedLayerIds : [];
@@ -524,10 +629,10 @@ async function refreshSourceChip() {
     const layerName = layer ? "“" + layer.name + "”" : "the selected layer";
     if (doc.hasSelection) {
       el.sourceTag.textContent = "2 REFERENCES";
-      el.sourceLabel.textContent = "Sends the full layer " + layerName + " + the selected area as context";
+      el.sourceLabel.textContent = "Full layer " + layerName + " + the selected area as context";
     } else {
       el.sourceTag.textContent = "LAYER";
-      el.sourceLabel.textContent = "No selection — sends the whole layer " + layerName + "; the result becomes a new layer";
+      el.sourceLabel.textContent = "No selection — sends the whole layer " + layerName;
     }
   } catch {
     el.sourceTag.textContent = "—";
@@ -550,27 +655,42 @@ function wire() {
   el.cancel.addEventListener("click", () => void cancelRun());
   el.apply.addEventListener("click", () => void applyResult());
   el.discard.addEventListener("click", discardResult);
+  el.addModel.addEventListener("click", addModelEntry);
+  el.modelInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addModelEntry();
+    }
+  });
+  el.model.addEventListener("change", () => {
+    const [provider, ...rest] = el.model.value.split(MODEL_SEPARATOR);
+    settings.provider = provider === "custom" ? "custom" : "replicate";
+    settings.model = rest.join(MODEL_SEPARATOR);
+    applyProviderUi();
+    void refreshCredential();
+    void persist();
+  });
+  el.provider.addEventListener("change", () => {
+    settings.provider = el.provider.value === "custom" ? "custom" : "replicate";
+    applyProviderUi();
+    void refreshCredential();
+  });
   el.setKey.addEventListener("click", () => void setKey());
   el.forgetKey.addEventListener("click", () => void forgetKey());
   el.test.addEventListener("click", () => void testConnection());
   el.save.addEventListener("click", () => {
     readUiIntoSettings();
     writeSettingsToUi();
+    if (Pipeline.clearSchemaCache) Pipeline.clearSchemaCache();
     void persist();
     el.testResult.textContent = "Settings saved.";
     setState("Idle");
     badge("Ready", "ok");
   });
-  el.provider.addEventListener("change", () => {
-    applyProviderUi();
-    void refreshCredential();
-  });
-  el.model.addEventListener("input", updateModelHint);
-  el.model.addEventListener("change", updateModelHint);
   el.prompt.addEventListener("input", () => {
     el.reason.textContent = el.prompt.value.trim()
-      ? "Ready to generate inside " + (el.sourceTag.textContent === "2 REFERENCES" ? "the selection" : "the layer") + "."
-      : "Describe what to generate inside the selection.";
+      ? "Ready to generate " + (el.sourceTag.textContent === "2 REFERENCES" ? "with the layer + selection references." : "from the whole layer.")
+      : "Describe what to generate.";
   });
 }
 
@@ -583,7 +703,7 @@ async function init() {
   badge("Ready", "ok");
   setStatus("ready");
   el.meta.textContent = Providers.providerInfo(settings.provider).label;
-  log("Image Gen ready · provider " + settings.provider);
+  log("Image Gen ready · " + settings.models.length + " saved model(s)");
 }
 
 if (!SDK) {

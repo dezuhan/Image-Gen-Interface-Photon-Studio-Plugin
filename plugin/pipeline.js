@@ -305,7 +305,7 @@
     const pollLimit = context.pollLimitMs || POLL_LIMIT_MS;
     const log = context.log || (() => {});
     const base = settings.baseUrl || Providers.PROVIDERS.replicate.base;
-    const submit = Providers.buildReplicateRequest({ base, ...payload });
+    const submit = Providers.buildReplicateRequest({ base, ...payload, properties: context.properties || null });
     await ensureOrigin(api, submit.url);
     progress(0.45, "Submitting to Replicate…");
     const response = await api.network.request({ url: submit.url, ...submit.options });
@@ -384,6 +384,32 @@
     return image;
   }
 
+  const schemaCache = new Map();
+
+  function clearSchemaCache() {
+    schemaCache.clear();
+  }
+
+  /** Read the model's declared input names once; fall back to null (family defaults) on failure. */
+  async function loadSchema(context) {
+    const settings = context.settings;
+    if (settings.provider !== "replicate") return null;
+    const key = settings.model;
+    if (schemaCache.has(key)) return schemaCache.get(key);
+    try {
+      const request = Providers.schemaRequest({ base: settings.baseUrl, model: settings.model });
+      const reply = await context.api.network.request({ url: request.url, ...request.options });
+      const properties = reply.status === 200 ? Providers.parseInputSchema(readJson(reply)) : null;
+      schemaCache.set(key, properties);
+      context.log("schema " + (properties ? [...properties].join(", ") : "unavailable"));
+      return properties;
+    } catch (error) {
+      schemaCache.set(key, null);
+      context.log("schema unavailable: " + errText(error));
+      return null;
+    }
+  }
+
   async function decodeImageValue(api, value, imageSource) {
     const normalized = Providers.normaliseImage(value, imageSource);
     if (!normalized) throw new Error("The provider returned no image.");
@@ -402,11 +428,18 @@
     const progress = options.progress || (() => {});
     const isCancelled = options.isCancelled || (() => false);
     const source = options.source || (await captureSource({ api, settings }));
+    const log = options.log || (() => {});
+    const schema = await loadSchema({ api, settings, log });
     const family = settings.provider === "replicate" ? Providers.modelFamily(settings.model) : "standard";
-    const twoReferences = family === "nano-banana" && source.hasSelection && Boolean(source.captureToken);
-    const targetSize = settings.size === "auto"
-      ? Math.min(Core.WORK_SIZES[2], Math.max(512, Core.roundTo(Math.max(source.width, source.height), 64)))
-      : Number(settings.size) || Core.WORK_SIZES[2];
+    const referenceModel = schema ? schema.has("image_input") : family === "nano-banana";
+    const twoReferences = settings.provider === "replicate" && referenceModel && source.hasSelection && Boolean(source.captureToken);
+    const SIZE_PIXELS = { "1K": 1024, "2K": 2048, "4K": 4096 };
+    const sizeKey = settings.size || "auto";
+    const numericSize = Number(sizeKey);
+    const targetSize = SIZE_PIXELS[sizeKey] || (Number.isFinite(numericSize) && numericSize > 0
+      ? numericSize
+      : Math.min(Core.WORK_SIZES[2], Math.max(512, Core.roundTo(Math.max(source.width, source.height), 64))));
+    const resolution = SIZE_PIXELS[sizeKey] ? sizeKey : null;
 
     progress(0.14, "Encoding…");
     let imageUri;
@@ -428,7 +461,7 @@
     } else {
       plan = Core.planSize(source.width, source.height, targetSize, Core.MAX_PIXELS);
       const baseImage = resizeRgba(source.pixels, source.width, source.height, plan.width, plan.height);
-      const sendMask = settings.provider === "custom" || Providers.supportsMask(settings.model);
+      const sendMask = settings.provider === "custom" || (schema ? schema.has("mask") : Providers.supportsMask(settings.model));
       const maskImage = sendMask
         ? Core.scaleMask(source.mask, source.maskWidth, source.maskHeight, plan.width, plan.height)
         : null;
@@ -455,13 +488,15 @@
       steps: settings.steps,
       guidance: settings.guidance,
       strength: settings.strength,
+      temperature: settings.temperature,
+      aspectRatio: settings.aspect,
+      resolution,
     };
 
     const timing = { pollMs: options.pollMs, pollLimitMs: options.pollLimitMs };
-    const log = options.log || (() => {});
     const imageValue = settings.provider === "custom"
       ? await requestCustom({ api, settings, payload, progress, isCancelled, log, ...timing })
-      : await requestReplicate({ api, settings, payload, progress, isCancelled, log, ...timing });
+      : await requestReplicate({ api, settings, payload, progress, isCancelled, log, properties: schema, ...timing });
 
     progress(0.88, "Downloading the result…");
     const generated = await decodeImageValue(api, imageValue, settings.custom && settings.custom.imageSource);
@@ -569,6 +604,7 @@
     readText,
     bodyToText,
     isBinary,
+    clearSchemaCache,
     captureSource,
     generate,
     apply,

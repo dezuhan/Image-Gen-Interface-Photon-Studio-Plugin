@@ -1134,3 +1134,75 @@ select.input option {
   height: 22px;
   font-size: 10px;
 }
+
+
+/* ---------- saved models, logs ---------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--ig-radius);
+  background: var(--ig-raise), var(--ig-control);
+  box-shadow: var(--ig-hairline);
+  font-size: 10px;
+  color: var(--ig-muted);
+}
+
+.model-row .model-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ig-text);
+}
+
+.button.tiny {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.logs-box {
+  margin-top: 6px;
+}
+
+.logs-box .log {
+  margin-top: 5px;
+}
+
+
+.row .input {
+  width: auto;
+}
+
+.row .button {
+  flex: none;
+  width: auto;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 10px;
+}

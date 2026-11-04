@@ -113,6 +113,30 @@ function fakeApi(options) {
           if (config.noId) return jsonReply(201, { status: "starting" });
           return jsonReply(201, { id: "p1", status: "starting" });
         }
+        if (request.url.includes("/v1/models/") && !request.url.endsWith("/predictions")) {
+          return jsonReply(200, {
+            latest_version: {
+              openapi_schema: {
+                components: {
+                  schemas: {
+                    Input: {
+                      properties: {
+                        prompt: {},
+                        image_input: {},
+                        match_input_image: {},
+                        aspect_ratio: {},
+                        resolution: {},
+                        temperature: {},
+                        output_format: {},
+                        seed: {},
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          });
+        }
         if (request.url.includes("/v1/predictions/p1")) {
           state.polls += 1;
           if (config.failPrediction) return jsonReply(200, { id: "p1", status: "failed", error: "model exploded" });
@@ -455,6 +479,26 @@ test("generate sends two references to nano-banana and crops the result back", a
   assert.equal(generated.twoReferences, true);
   assert.equal(generated.image.width, 64, "the result is cropped back to the selection");
   assert.equal(generated.image.height, 48);
+});
+
+
+test("schema-driven payload sends resolution, aspect ratio and temperature", async () => {
+  Pipeline.clearSchemaCache();
+  const api = fakeApi({});
+  const settings = replicateSettings({
+    model: "google/nano-banana-2",
+    size: "2K",
+    aspect: "16:9",
+    temperature: 0.6,
+  });
+  const source = await Pipeline.captureSource({ api, settings });
+  await Pipeline.generate({ api, settings, source, prompt: "a rooftop pool", seed: 3, pollMs: 1 });
+  const submit = api.lastSubmit;
+  assert.equal(submit.input.resolution, "2K");
+  assert.equal(submit.input.aspect_ratio, "16:9");
+  assert.equal(submit.input.temperature, 0.6);
+  assert.equal(submit.input.match_input_image, false);
+  assert.equal(submit.input.image_input.length, 2);
 });
 
 (async () => {
