@@ -172,13 +172,48 @@ test("captureSource reads the selection bounds and coverage mask", async () => {
   assert.equal(api.calls.includes("capture"), true);
 });
 
-test("captureSource falls back to the whole layer without a selection", async () => {
+test("selection mode refuses when nothing is selected", async () => {
   const api = fakeApi({ noSelection: true });
-  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
+  await assert.rejects(
+    () => Pipeline.captureSource({ api, settings: replicateSettings({ source: "selection" }) }),
+    /nothing is selected/i,
+  );
+});
+
+test("layer mode uses the whole layer and ignores the selection", async () => {
+  const api = fakeApi({});
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings({ source: "layer" }) });
+  assert.equal(source.mode, "layer");
   assert.equal(source.hasSelection, false);
   assert.equal(source.captureToken, null);
   assert.deepEqual(source.bounds, { x: 0, y: 0, width: 400, height: 300 });
   assert.equal(source.mask.length, 400 * 300 * 4);
+  assert.equal(api.calls.includes("capture"), false, "no capture is taken in layer mode");
+});
+
+test("layer mode applies the result as a new layer without a capture token", async () => {
+  const api = fakeApi({});
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings({ source: "layer" }) });
+  const outcome = await Pipeline.apply({
+    api,
+    result: {
+      image: { width: source.width, height: source.height, pixels: fillLayer(source.width, source.height, 200) },
+      bounds: source.bounds,
+      originX: 0,
+      originY: 0,
+      captureToken: null,
+      mask: source.mask,
+      maskWidth: source.maskWidth,
+      maskHeight: source.maskHeight,
+      hasSelection: false,
+      prompt: "x",
+      model: "m",
+      docId: "doc1",
+    },
+    name: "layer result",
+  });
+  assert.equal(outcome.method, "writePixels");
+  assert.equal(api.calls.includes("applyImage"), false);
 });
 
 test("captureSource expands the bounds by the margin", async () => {

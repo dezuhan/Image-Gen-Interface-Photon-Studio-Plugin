@@ -14,6 +14,7 @@
 
   const DEFAULTS = {
     provider: "replicate",
+    source: "selection",
     model: "black-forest-labs/flux-fill-dev",
     size: "auto",
     steps: 28,
@@ -23,6 +24,7 @@
     seed: null,
   };
 
+  const SOURCES = ["selection", "layer"];
   const WORK_SIZES = [512, 768, 1024, 1536];
   const MAX_EDGE = 8192;
   const MAX_PIXELS = 16 * 1024 * 1024;
@@ -293,6 +295,7 @@
 
   return {
     DEFAULTS,
+    SOURCES,
     WORK_SIZES,
     MAX_EDGE,
     MAX_PIXELS,

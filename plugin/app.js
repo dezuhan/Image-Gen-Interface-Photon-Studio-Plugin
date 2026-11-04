@@ -20,6 +20,7 @@ const el = {
   tabSettings: document.getElementById("tabSettings"),
   viewGenerate: document.getElementById("viewGenerate"),
   viewSettings: document.getElementById("viewSettings"),
+  source: document.getElementById("source"),
   sourceTag: document.getElementById("sourceTag"),
   sourceLabel: document.getElementById("sourceLabel"),
   prompt: document.getElementById("prompt"),
@@ -129,6 +130,7 @@ function syncSelects() {
 function defaultSettings() {
   return {
     provider: Core.DEFAULTS.provider,
+    source: Core.DEFAULTS.source,
     model: Core.DEFAULTS.model,
     baseUrl: "",
     size: "auto",
@@ -165,6 +167,7 @@ async function persist() {
 }
 
 function readUiIntoSettings() {
+  settings.source = el.source.value === "layer" ? "layer" : "selection";
   settings.provider = el.provider.value === "custom" ? "custom" : "replicate";
   settings.model = el.model.value.trim() || Core.DEFAULTS.model;
   settings.baseUrl = el.baseUrl.value.trim();
@@ -189,6 +192,7 @@ function readUiIntoSettings() {
 }
 
 function writeSettingsToUi() {
+  el.source.value = settings.source === "layer" ? "layer" : "selection";
   el.provider.value = settings.provider;
   el.model.value = settings.model;
   el.baseUrl.value = settings.baseUrl || "";
@@ -499,6 +503,7 @@ async function testConnection() {
 async function refreshSourceChip() {
   try {
     const doc = await api.documents.active();
+    const mode = el.source.value === "layer" ? "layer" : "selection";
     if (!doc) {
       el.sourceTag.textContent = "No document";
       el.sourceLabel.textContent = "Open a document";
@@ -506,13 +511,20 @@ async function refreshSourceChip() {
     }
     const selected = Array.isArray(doc.selectedLayerIds) ? doc.selectedLayerIds : [];
     const layer = (doc.layers || []).find((item) => item.id === selected[selected.length - 1]);
-    if (doc.hasSelection) {
-      el.sourceTag.textContent = "Selection";
-      el.sourceLabel.textContent = "Replaces the selected area" + (layer ? " of “" + layer.name + "”" : "");
-    } else {
-      el.sourceTag.textContent = "Layer";
-      el.sourceLabel.textContent = layer ? "“" + layer.name + "”" : "Select a layer";
+    if (mode === "layer") {
+      el.sourceTag.textContent = "LAYER";
+      el.sourceLabel.textContent = layer
+        ? "Generates the whole layer “" + layer.name + "” (the result becomes a new layer)"
+        : "Select a layer in the Layers panel";
+      return;
     }
+    if (!doc.hasSelection) {
+      el.sourceTag.textContent = "SELECTION";
+      el.sourceLabel.textContent = "Nothing selected — make a selection, or switch Source to “Selected layer”";
+      return;
+    }
+    el.sourceTag.textContent = "SELECTION";
+    el.sourceLabel.textContent = "Generates only the selected area" + (layer ? " of “" + layer.name + "”" : "");
   } catch {
     el.sourceTag.textContent = "—";
     el.sourceLabel.textContent = "Document unavailable";
@@ -548,6 +560,11 @@ function wire() {
   el.provider.addEventListener("change", () => {
     applyProviderUi();
     void refreshCredential();
+  });
+  el.source.addEventListener("change", () => {
+    readUiIntoSettings();
+    void refreshSourceChip();
+    void persist();
   });
   el.prompt.addEventListener("input", () => {
     el.reason.textContent = el.prompt.value.trim()

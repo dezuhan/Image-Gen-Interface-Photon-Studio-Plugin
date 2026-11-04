@@ -194,8 +194,15 @@
     const layerId = selected[selected.length - 1];
     if (!layerId) throw new Error("Select a layer in the Layers panel first.");
 
+    const mode = settings.source === "layer" ? "layer" : "selection";
+    if (mode === "selection" && !doc.hasSelection) {
+      throw new Error(
+        "Source is “Selection only”, but nothing is selected. Make a selection in Photon, or switch Source to “Selected layer”.",
+      );
+    }
+
     let capture = null;
-    if (doc.hasSelection) {
+    if (mode === "selection") {
       try {
         capture = await api.documents.capture({});
       } catch {
@@ -224,7 +231,7 @@
     const originY = (read.sourceBounds && read.sourceBounds.top) || 0;
 
     let bounds = null;
-    if (capture && capture.bounds) {
+    if (mode === "selection" && capture && capture.bounds) {
       const left = Math.round(capture.bounds.x - originX);
       const top = Math.round(capture.bounds.y - originY);
       bounds = {
@@ -239,7 +246,7 @@
     if (!bounds) bounds = { x: 0, y: 0, width: layerWidth, height: layerHeight };
 
     let mask;
-    if (capture && capture.mask && capture.mask.length >= bounds.width * bounds.height) {
+    if (mode === "selection" && capture && capture.mask && capture.mask.length >= bounds.width * bounds.height) {
       mask = capture.mask.length >= bounds.width * bounds.height * 4
         ? Core.maskFromAlpha(capture.mask, 4, bounds.width, bounds.height)
         : Core.maskFromCoverage(capture.mask, bounds.width, bounds.height);
@@ -284,8 +291,9 @@
       mask,
       maskWidth: bounds.width,
       maskHeight: bounds.height,
-      captureToken: capture && capture.token ? capture.token : null,
-      hasSelection: Boolean(doc.hasSelection),
+      captureToken: mode === "selection" && capture && capture.token ? capture.token : null,
+      hasSelection: mode === "selection" && Boolean(doc.hasSelection),
+      mode,
     };
   }
 

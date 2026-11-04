@@ -20,6 +20,17 @@
       </div>
 
       <section id="viewGenerate" class="view">
+        <div class="field">
+          <label class="label" for="source">Source</label>
+          <span class="select">
+            <select id="source">
+              <option value="selection" selected>Selection only</option>
+              <option value="layer">Selected layer</option>
+            </select>
+            <span class="chevron" aria-hidden="true"></span>
+          </span>
+        </div>
+
         <div class="chip-row">
           <span class="tag" id="sourceTag">Selection</span>
           <strong id="sourceLabel">Nothing selected</strong>

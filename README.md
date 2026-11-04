@@ -17,6 +17,19 @@ written back **only inside the selection** as one undoable step.
 4. Back in **Generate**, make a selection (optional), write a prompt and press **Generate**, then
    **Apply**.
 
+## Sources
+
+The panel has two source modes, chosen with the **Source** control:
+
+| Source | Input image | Mask | Result |
+| --- | --- | --- | --- |
+| **Selection only** | the captured selection crop | the selection coverage (feathered) | composited inside the selection with `applyImage(captureToken)` |
+| **Selected layer** | the whole selected layer | none (full rectangle) | written as a new layer aligned to the layer |
+
+*Selection only* is the Photoshop-style generative fill: it requires an active selection, and Photon
+errors clearly when there is none. *Selected layer* ignores the selection entirely and regenerates the
+whole layer as one image.
+
 ## How selection editing works
 
 Photon exposes the current selection to plugins only as a boolean, so the plugin uses the SDK's
@@ -32,8 +45,8 @@ capture API:
 4. If the capture API is unavailable, the plugin still generates from the selected layer and writes
    the result as a new layer with the mask applied to its alpha (masked fallback).
 
-Without a selection the whole selected layer becomes the source and the result lands as a new layer
-aligned to the layer's bounds.
+In *Selected layer* mode no capture is taken; the layer pixels are the base image and the result
+lands as a new layer aligned to the layer's bounds.
 
 ## Providers
 
@@ -110,6 +123,15 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.2.0
+
+- **Two explicit source modes** instead of implicit selection detection: **Selection only** (capture
+  the selection, edit inside it) and **Selected layer** (regenerate the whole layer, ignore the
+  selection).
+- Selection mode now fails with a clear message when nothing is selected instead of silently falling
+  back to the layer.
+- Tests: 51.
 
 ### 0.1.3
 
