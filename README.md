@@ -162,6 +162,10 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 
 ## Changelog
 
+### 0.7.4
+
+- Details overlay now has a **copy all logs** icon (system clipboard, with a textarea fallback).
+
 ### 0.7.3
 
 - Footer follows the shared plugin pattern: version on the left, `Details` and `Check service`

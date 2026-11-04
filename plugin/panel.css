@@ -1364,3 +1364,40 @@ select.input option {
   line-height: 15px;
   white-space: pre-wrap;
 }
+
+
+/* ---------- details log actions ---------- */
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ig-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--ig-control-hover);
+  color: var(--ig-text);
+}
+
+.icon-button.is-copied {
+  color: var(--ig-accent);
+}
+
+#status[hidden],
+#meta[hidden],
+#convMeta[hidden] {
+  display: none !important;
+}
