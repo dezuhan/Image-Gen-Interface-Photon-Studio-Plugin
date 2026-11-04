@@ -4,9 +4,11 @@ Selection-aware generative image / inpainting for Photon Studio, powered by **Re
 **custom HTTP endpoint**. Make a selection in Photon, describe what belongs there, and the result is
 written back **only inside the selection** as one undoable step.
 
-| Generate | Settings |
+| Generate | History |
 | --- | --- |
-| ![Generate panel](docs/generate.png) | ![Settings panel](docs/settings.png) |
+| ![Generate panel](docs/generate.png) | ![History panel](docs/history.png) |
+
+![Settings panel](docs/settings.png)
 
 ## Install
 
@@ -111,9 +113,15 @@ Placeholders are JSON-escaped, so prompts with quotes cannot break the template.
 | Margin (px) | 0–256 | Grows the capture rectangle around the selection for context |
 | Strength | 0.1–1 | Image-to-image strength where supported |
 
-The panel keeps the last six results (prompt, size, thumbnail) for quick reuse. Logs live in their
-own collapsible **Logs** section at the bottom of the panel (it opens automatically on errors), the
-same layout as the Upscale panel.
+## Tabs
+
+- **Generate** — prompt, model, work size, aspect ratio, temperature, advanced settings, preview,
+  Apply/Discard.
+- **History** — the last ten generations. *Use* restores the prompt and settings; *Insert* places the
+  image into the document again. The full image is cached in memory for the session, so after a
+  restart the thumbnails stay but the image has to be generated again (the button explains this).
+- **Settings** — provider, model library, API key, custom endpoint template, and the **Logs** section
+  (auto-opens on errors). Logs are only shown here; the same layout as the Upscale panel.
 
 ## Limits and failure modes
 
@@ -147,6 +155,15 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.7.0
+
+- **Three tabs**: Generate, History, Settings.
+- **History is its own tab** with *Insert* (place the image into the document again, session cache)
+  and *Use* (restore prompt/settings). History keeps ten entries instead of six.
+- **Logs live only in Settings** (still auto-open on errors).
+- Removed the source chip above the prompt field.
+- Tests: 61.
 
 ### 0.6.0
 

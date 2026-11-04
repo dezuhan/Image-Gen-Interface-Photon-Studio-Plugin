@@ -1206,3 +1206,21 @@ select.input option {
   padding: 0 8px;
   font-size: 10px;
 }
+
+
+.history-actions {
+  display: flex;
+  flex: none;
+  gap: 3px;
+}
+
+.history-actions .button.tiny {
+  width: auto;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 9px;
+}
+
+.button.tiny:disabled {
+  opacity: 0.4;
+}

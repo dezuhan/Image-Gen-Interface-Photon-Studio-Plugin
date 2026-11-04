@@ -4,7 +4,8 @@
  * Image Gen panel — UI layer.
  *
  * All document work lives in pipeline.js (capture → generate → apply), provider knowledge in
- * providers.js. This file wires the controls, the saved-model library, the preview and the logs.
+ * providers.js. This file wires the three tabs (Generate / History / Settings), the saved-model
+ * library, the preview, the history cache and the logs.
  */
 
 const SDK = globalThis.__photonSdk;
@@ -17,11 +18,11 @@ const el = {
   sep: document.getElementById("sep"),
   badge: document.getElementById("badge"),
   tabGenerate: document.getElementById("tabGenerate"),
+  tabHistory: document.getElementById("tabHistory"),
   tabSettings: document.getElementById("tabSettings"),
   viewGenerate: document.getElementById("viewGenerate"),
+  viewHistory: document.getElementById("viewHistory"),
   viewSettings: document.getElementById("viewSettings"),
-  sourceTag: document.getElementById("sourceTag"),
-  sourceLabel: document.getElementById("sourceLabel"),
   prompt: document.getElementById("prompt"),
   model: document.getElementById("model"),
   size: document.getElementById("size"),
@@ -42,7 +43,6 @@ const el = {
   previewCanvas: document.getElementById("previewCanvas"),
   apply: document.getElementById("apply"),
   discard: document.getElementById("discard"),
-  historyBox: document.getElementById("historyBox"),
   history: document.getElementById("history"),
   provider: document.getElementById("provider"),
   providerHint: document.getElementById("providerHint"),
@@ -76,6 +76,7 @@ const el = {
 
 const SETTINGS_KEY = "imagegen";
 const MODEL_SEPARATOR = "|";
+const MODE_LABELS = { generate: "Generate", history: "History", settings: "Settings" };
 
 let api = null;
 let settings = null;
@@ -83,6 +84,7 @@ let credential = null;
 let busy = false;
 let cancelled = false;
 let result = null;
+const imageCache = new Map(); // history id → { image, placement }, session only
 
 /* ---------- UI helpers ---------- */
 
@@ -198,7 +200,7 @@ async function loadSettings() {
   settings.temperature = Core.clamp(settings.temperature === undefined || settings.temperature === "" ? 1 : settings.temperature, 0, 2);
   settings.size = ["auto", "1K", "2K", "4K"].includes(settings.size) ? settings.size : "auto";
   settings.aspect = ["auto"].concat(Providers.ASPECT_RATIOS).includes(settings.aspect) ? settings.aspect : "auto";
-  settings.history = Array.isArray(settings.history) ? settings.history.slice(0, 6) : [];
+  settings.history = Array.isArray(settings.history) ? settings.history.slice(0, 10) : [];
 }
 
 async function persist() {
@@ -209,10 +211,6 @@ async function persist() {
   } catch (error) {
     log("settings save failed: " + errText(error));
   }
-}
-
-function selectedEntry() {
-  return { provider: settings.provider === "custom" ? "custom" : "replicate", model: settings.model };
 }
 
 function readUiIntoSettings() {
@@ -264,14 +262,14 @@ function rebuildModelSelect() {
 
 function rebuildAspectSelect() {
   el.aspect.textContent = "";
-  const options = ["auto"].concat(Providers.ASPECT_RATIOS);
-  for (const value of options) {
+  for (const value of ["auto"].concat(Providers.ASPECT_RATIOS)) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = value === "auto" ? "Auto (match input)" : value;
     el.aspect.append(option);
   }
   el.aspect.value = settings.aspect || "auto";
+  syncSelects();
 }
 
 function renderModelList() {
@@ -319,7 +317,7 @@ function writeSettingsToUi() {
   el.margin.value = String(settings.margin);
   el.seed.value = "";
   el.baseUrl.value = settings.baseUrl || "";
-  el.submitUrl.value = settings.custom.submitUrl;
+  el.submitUrl.value = settings.custom.submitUrl || "";
   el.method.value = settings.custom.method || "POST";
   el.mode.value = settings.custom.mode || "immediate";
   el.headersTemplate.value = settings.custom.headersTemplate || "{}";
@@ -330,6 +328,7 @@ function writeSettingsToUi() {
   el.statusPath.value = settings.custom.statusPath || "status";
   el.successValues.value = settings.custom.successValues || Providers.CUSTOM_DEFAULTS.successValues;
   renderModelList();
+  renderHistory();
   applyProviderUi();
   syncSelects();
 }
@@ -356,7 +355,7 @@ async function refreshCredential() {
   el.forgetKey.hidden = !configured;
 }
 
-/* ---------- preview & history ---------- */
+/* ---------- preview ---------- */
 
 function sizePreview(image) {
   const maxWidth = Math.max(140, (el.preview.clientWidth || 340) - 14);
@@ -397,11 +396,18 @@ function thumbnail(image) {
   return canvas.toDataURL("image/png");
 }
 
+/* ---------- history ---------- */
+
 function renderHistory() {
   const items = settings && Array.isArray(settings.history) ? settings.history : [];
-  el.historyBox.hidden = items.length === 0;
-  if (items.length && !el.historyBox.open) el.historyBox.open = true;
   el.history.textContent = "";
+  if (!items.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No generations yet.";
+    el.history.append(empty);
+    return;
+  }
   for (const item of items) {
     const row = document.createElement("div");
     row.className = "history-item";
@@ -410,31 +416,128 @@ function renderHistory() {
     img.src = item.thumb || "";
     const label = document.createElement("span");
     label.textContent = (item.prompt || "image") + " · " + item.width + "×" + item.height;
-    label.title = label.textContent;
-    row.append(img, label);
-    row.addEventListener("click", () => {
-      el.prompt.value = item.prompt || "";
-      el.reason.textContent = "History: " + label.textContent;
-    });
+    label.title = label.textContent + (item.at ? "\n" + item.at : "");
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+
+    const insert = document.createElement("button");
+    insert.type = "button";
+    insert.className = "button tiny";
+    insert.textContent = "Insert";
+    insert.disabled = !imageCache.has(item.id);
+    insert.title = imageCache.has(item.id) ? "Place this image into the document" : "Only available in the session that generated it.";
+    insert.addEventListener("click", () => void insertHistory(item, insert));
+
+    const use = document.createElement("button");
+    use.type = "button";
+    use.className = "button tiny";
+    use.textContent = "Use";
+    use.title = "Restore the prompt and settings";
+    use.addEventListener("click", () => restoreHistory(item));
+
+    actions.append(insert, use);
+    row.append(img, label, actions);
     el.history.append(row);
   }
 }
 
 function addHistory(current) {
   try {
+    const id = String(Date.now());
     const item = {
+      id,
       prompt: current.prompt.slice(0, 80),
       model: current.model,
+      provider: settings.provider,
       width: current.image.width,
       height: current.image.height,
+      size: settings.size,
+      aspect: settings.aspect,
+      temperature: settings.temperature,
       at: new Date().toISOString(),
       thumb: thumbnail(current.image),
     };
-    settings.history = [item, ...(settings.history || [])].slice(0, 6);
+    imageCache.set(id, {
+      image: current.image,
+      placement: {
+        bounds: current.bounds,
+        originX: current.originX,
+        originY: current.originY,
+        hasSelection: current.hasSelection,
+        mask: current.mask,
+        maskWidth: current.maskWidth,
+        maskHeight: current.maskHeight,
+      },
+    });
+    settings.history = [item, ...(settings.history || [])].slice(0, 10);
     renderHistory();
     void persist();
   } catch {
     /* thumbnails are cosmetic */
+  }
+}
+
+function restoreHistory(item) {
+  el.prompt.value = item.prompt || "";
+  if (item.model) {
+    const entry = settings.models.find((model) => model.model === item.model);
+    if (entry) {
+      settings.provider = entry.provider;
+      settings.model = entry.model;
+      rebuildModelSelect();
+      applyProviderUi();
+    }
+  }
+  if (item.size) el.size.value = item.size;
+  if (item.aspect) el.aspect.value = item.aspect;
+  if (item.temperature !== undefined) el.temperature.value = String(item.temperature);
+  showMode("generate");
+  el.reason.textContent = "Restored from history — Generate to recreate it.";
+}
+
+async function insertHistory(item, button) {
+  const cached = imageCache.get(item.id);
+  if (!cached) {
+    el.reason.textContent = "That image is not in memory any more — Generate it again.";
+    return;
+  }
+  button.disabled = true;
+  setBusy(true);
+  badge("Working…", "busy");
+  setState("Inserting");
+  try {
+    const doc = await api.documents.active();
+    if (!doc) throw new Error("Open a document first.");
+    const name = ("Image Gen — " + (item.prompt || "history")).slice(0, 120);
+    await Pipeline.apply({
+      api,
+      result: {
+        image: cached.image,
+        bounds: cached.placement.bounds,
+        originX: cached.placement.originX,
+        originY: cached.placement.originY,
+        captureToken: null,
+        mask: cached.placement.mask,
+        maskWidth: cached.placement.maskWidth,
+        maskHeight: cached.placement.maskHeight,
+        hasSelection: cached.placement.hasSelection,
+        prompt: item.prompt,
+        model: item.model,
+        docId: doc.id,
+      },
+      name,
+    });
+    log("history insert: " + name);
+    el.reason.textContent = "Inserted from history.";
+    showMode("generate");
+    badge("Ready", "ok");
+    setState("Applied");
+  } catch (error) {
+    fail(error);
+  } finally {
+    button.disabled = false;
+    setBusy(false);
+    progress(0);
   }
 }
 
@@ -493,7 +596,7 @@ async function runGenerate() {
       " · " + settings.size + " · " + settings.aspect + ". Apply writes it back.";
     el.apply.hidden = false;
     el.discard.hidden = false;
-    el.meta.textContent = source.width + "×" + source.height + (source.hasSelection ? " selection" : " layer");
+    el.meta.textContent = result.image.width + "×" + result.image.height + (source.hasSelection ? " selection" : " layer");
     void persist();
   } catch (error) {
     fail(error);
@@ -556,8 +659,7 @@ function addModelEntry() {
     return;
   }
   const provider = el.provider.value === "custom" ? "custom" : "replicate";
-  const key = provider + MODEL_SEPARATOR + model;
-  if (!settings.models.some((entry) => entry.provider + MODEL_SEPARATOR + entry.model === key)) {
+  if (!settings.models.some((entry) => entry.provider === provider && entry.model === model)) {
     settings.models.push({ provider, model });
   }
   settings.provider = provider;
@@ -628,43 +730,23 @@ async function testConnection() {
   }
 }
 
-/* ---------- source chip & wiring ---------- */
+/* ---------- tabs & wiring ---------- */
 
-async function refreshSourceChip() {
-  try {
-    const doc = await api.documents.active();
-    if (!doc) {
-      el.sourceTag.textContent = "NO DOCUMENT";
-      el.sourceLabel.textContent = "Open an image to start";
-      return;
-    }
-    const selected = Array.isArray(doc.selectedLayerIds) ? doc.selectedLayerIds : [];
-    const layer = (doc.layers || []).find((item) => item.id === selected[selected.length - 1]);
-    const layerName = layer ? "“" + layer.name + "”" : "the selected layer";
-    if (doc.hasSelection) {
-      el.sourceTag.textContent = "2 REFERENCES";
-      el.sourceLabel.textContent = "Full layer " + layerName + " + the selected area as context";
-    } else {
-      el.sourceTag.textContent = "LAYER";
-      el.sourceLabel.textContent = "No selection — sends the whole layer " + layerName;
-    }
-  } catch {
-    el.sourceTag.textContent = "—";
-    el.sourceLabel.textContent = "Document unavailable";
-  }
-}
-
-function showView(name) {
-  const settingsView = name === "settings";
-  el.viewGenerate.hidden = settingsView;
-  el.viewSettings.hidden = !settingsView;
-  el.tabGenerate.classList.toggle("active", !settingsView);
-  el.tabSettings.classList.toggle("active", settingsView);
+function showMode(mode) {
+  const current = MODE_LABELS[mode] ? mode : "generate";
+  el.viewGenerate.hidden = current !== "generate";
+  el.viewHistory.hidden = current !== "history";
+  el.viewSettings.hidden = current !== "settings";
+  el.tabGenerate.classList.toggle("active", current === "generate");
+  el.tabHistory.classList.toggle("active", current === "history");
+  el.tabSettings.classList.toggle("active", current === "settings");
+  if (current === "history") renderHistory();
 }
 
 function wire() {
-  el.tabGenerate.addEventListener("click", () => showView("generate"));
-  el.tabSettings.addEventListener("click", () => showView("settings"));
+  el.tabGenerate.addEventListener("click", () => showMode("generate"));
+  el.tabHistory.addEventListener("click", () => showMode("history"));
+  el.tabSettings.addEventListener("click", () => showMode("settings"));
   el.generate.addEventListener("click", () => void runGenerate());
   el.cancel.addEventListener("click", () => void cancelRun());
   el.apply.addEventListener("click", () => void applyResult());
@@ -701,13 +783,11 @@ function wire() {
     setState("Idle");
     badge("Ready", "ok");
   });
+  el.prompt.addEventListener("input", () => {
+    el.reason.textContent = el.prompt.value.trim() ? "Ready to generate." : "Describe what to generate.";
+  });
   window.addEventListener("resize", () => {
     if (result && !el.previewCanvas.hidden) sizePreview(result.image);
-  });
-  el.prompt.addEventListener("input", () => {
-    el.reason.textContent = el.prompt.value.trim()
-      ? "Ready to generate " + (el.sourceTag.textContent === "2 REFERENCES" ? "with the layer + selection references." : "from the whole layer.")
-      : "Describe what to generate.";
   });
 }
 
@@ -715,7 +795,6 @@ async function init() {
   await loadSettings();
   writeSettingsToUi();
   await refreshCredential();
-  await refreshSourceChip();
   setState("Idle");
   badge("Ready", "ok");
   setStatus("ready");

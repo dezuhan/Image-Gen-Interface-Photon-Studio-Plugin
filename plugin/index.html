@@ -16,15 +16,11 @@
 
       <div class="tabs" role="tablist">
         <button id="tabGenerate" class="tab active" type="button" role="tab">Generate</button>
+        <button id="tabHistory" class="tab" type="button" role="tab">History</button>
         <button id="tabSettings" class="tab" type="button" role="tab">Settings</button>
       </div>
 
       <section id="viewGenerate" class="view">
-        <div class="chip-row">
-          <span class="tag" id="sourceTag">REFERENCES</span>
-          <strong id="sourceLabel">Open an image to start</strong>
-        </div>
-
         <textarea id="prompt" class="prompt" placeholder="Describe what to generate inside the selection…"></textarea>
 
         <div class="grid2">
@@ -108,11 +104,11 @@
           <button id="apply" class="button primary" type="button" hidden>Apply</button>
           <button id="discard" class="button quiet" type="button" hidden>Discard</button>
         </div>
+      </section>
 
-        <details id="historyBox" class="advanced" hidden>
-          <summary>Recent</summary>
-          <div id="history" class="history"></div>
-        </details>
+      <section id="viewHistory" class="view" hidden>
+        <p class="hint">Results from this session can be inserted again. After a restart the thumbnails stay, but the full image must be generated again.</p>
+        <div id="history" class="history"></div>
       </section>
 
       <section id="viewSettings" class="view" hidden>
@@ -225,12 +221,12 @@
           <button id="test" class="button" type="button">Test connection</button>
         </div>
         <p id="testResult" class="hint"></p>
-      </section>
 
-      <details id="logsBox" class="advanced logs-box">
-        <summary>Logs</summary>
-        <pre id="log" class="log"></pre>
-      </details>
+        <details id="logsBox" class="advanced logs-box">
+          <summary>Logs</summary>
+          <pre id="log" class="log"></pre>
+        </details>
+      </section>
 
       <footer class="panel-footer">
         <span id="status">ready</span>
