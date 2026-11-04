@@ -99,10 +99,12 @@ function fakeApi(options) {
         calls.push("request:" + request.url);
         const jsonReply = (status, payload) => ({
           status,
-          body: new TextEncoder().encode(JSON.stringify(payload)),
-          headers: {},
+          // config.stringBody simulates a host that hands JSON back as text instead of bytes
+          body: config.stringBody ? JSON.stringify(payload) : new TextEncoder().encode(JSON.stringify(payload)),
+          headers: { "content-type": "application/json" },
         });
         if (request.url.includes("/v1/models/") && request.url.endsWith("/predictions")) {
+          if (config.noId) return jsonReply(201, { status: "starting" });
           return jsonReply(201, { id: "p1", status: "starting" });
         }
         if (request.url.includes("/v1/predictions/p1")) {
@@ -341,6 +343,59 @@ test("apply refuses when the document changed", async () => {
     }),
     /document changed/i,
   );
+});
+
+
+test("readJson accepts strings, ArrayBuffers and typed views", () => {
+  const text = '{"id":"p1","status":"starting"}';
+  assert.deepEqual(Pipeline.readJson({ status: 200, body: text }), { id: "p1", status: "starting" });
+  assert.deepEqual(
+    Pipeline.readJson({ status: 200, body: new TextEncoder().encode(text).buffer }),
+    { id: "p1", status: "starting" },
+  );
+  const bytes = new TextEncoder().encode(text);
+  assert.deepEqual(Pipeline.readJson({ status: 200, body: new DataView(bytes.buffer) }), {
+    id: "p1",
+    status: "starting",
+  });
+  assert.deepEqual(Pipeline.readJson({ status: 200, body: new Uint8Array(bytes) }), {
+    id: "p1",
+    status: "starting",
+  });
+});
+
+test("generate works when the host returns JSON as a string body", async () => {
+  const api = fakeApi({ stringBody: true });
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
+  const generated = await Pipeline.generate({
+    api,
+    settings: replicateSettings(),
+    source,
+    prompt: "a red bicycle",
+    seed: 1,
+    pollMs: 1,
+  });
+  assert.equal(generated.image.width, 64);
+});
+
+test("a submit without an id fails with the body in the message and logs the response", async () => {
+  const api = fakeApi({ noId: true });
+  const source = await Pipeline.captureSource({ api, settings: replicateSettings() });
+  const lines = [];
+  await assert.rejects(
+    () =>
+      Pipeline.generate({
+        api,
+        settings: replicateSettings(),
+        source,
+        prompt: "x",
+        seed: 1,
+        pollMs: 1,
+        log: (line) => lines.push(line),
+      }),
+    /no prediction id .*Submit body/i,
+  );
+  assert.ok(lines.some((line) => line.startsWith("submit HTTP 201")), "the submit response is logged");
 });
 
 (async () => {

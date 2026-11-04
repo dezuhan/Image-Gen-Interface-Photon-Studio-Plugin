@@ -108,31 +108,45 @@
   }
 
   /**
-   * Photon's network.request returns { status, body: Uint8Array, headers }; there is no `json`
-   * field. Decoding the body is what turns a prediction into { id, status, output }.
+   * Photon's network.request returns { status, body, headers }. Depending on the build, `body` can
+   * be a Uint8Array, an ArrayBuffer, a typed-array view, or already-decoded text — the helpers below
+   * accept all of them, which is what keeps the prediction id readable.
    */
+  function bodyToText(body) {
+    if (body === null || body === undefined) return "";
+    if (typeof body === "string") return body;
+    if (body instanceof ArrayBuffer) return new TextDecoder().decode(new Uint8Array(body));
+    if (ArrayBuffer.isView(body)) {
+      return new TextDecoder().decode(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+    }
+    if (typeof body === "object" && typeof body.text === "string") return body.text;
+    try {
+      return new TextDecoder().decode(new Uint8Array(body));
+    } catch {
+      return "";
+    }
+  }
+
   function readJson(reply) {
     if (!reply) return null;
     if (reply.json !== undefined) return reply.json;
-    const body = reply.body;
-    if (!body) return null;
-    const bytes = body instanceof Uint8Array ? body : new Uint8Array(body);
-    if (!bytes.length) return null;
+    const text = bodyToText(reply.body).trim();
+    if (!text) return null;
     try {
-      return JSON.parse(new TextDecoder().decode(bytes));
+      return JSON.parse(text);
     } catch {
       return null;
     }
   }
 
   function readText(reply) {
-    if (!reply || !reply.body) return "";
-    const bytes = reply.body instanceof Uint8Array ? reply.body : new Uint8Array(reply.body);
-    try {
-      return new TextDecoder().decode(bytes).slice(0, 400);
-    } catch {
-      return "";
-    }
+    return bodyToText(reply && reply.body).slice(0, 400);
+  }
+
+  function preview(reply) {
+    const text = readText(reply);
+    const type = (reply && reply.headers && (reply.headers["content-type"] || reply.headers["Content-Type"])) || "";
+    return "HTTP " + (reply && reply.status) + (type ? " " + type : "") + (text ? " · " + text.slice(0, 200) : " · empty body");
   }
 
   async function ensureOrigin(api, url) {
@@ -267,17 +281,25 @@
     const { api, settings, payload, progress, isCancelled } = context;
     const pollMs = context.pollMs || POLL_MS;
     const pollLimit = context.pollLimitMs || POLL_LIMIT_MS;
+    const log = context.log || (() => {});
     const base = settings.baseUrl || Providers.PROVIDERS.replicate.base;
     const submit = Providers.buildReplicateRequest({ base, ...payload });
     await ensureOrigin(api, submit.url);
     progress(0.45, "Submitting to Replicate…");
     const response = await api.network.request({ url: submit.url, ...submit.options });
+    context.log("submit " + preview(response));
     if (response.status < 200 || response.status >= 300) {
       const detail = readText(response);
       throw new Error("Replicate rejected the request (HTTP " + response.status + ")" + (detail ? ": " + detail : ""));
     }
-    let prediction = Providers.parsePrediction(readJson(response));
-    if (!prediction.id) throw new Error("Replicate accepted the request but returned no prediction id.");
+    const submitted = readJson(response);
+    let prediction = Providers.parsePrediction(submitted);
+    if (!prediction.id) {
+      throw new Error(
+        "Replicate accepted the request but returned no prediction id (" +
+          preview(response) + "). Submit body: " + JSON.stringify(submitted || null).slice(0, 300),
+      );
+    }
     const started = Date.now();
     while (prediction.status === "pending") {
       if (isCancelled()) throw new Error("cancelled by the user");
@@ -303,11 +325,13 @@
     const { api, settings, payload, progress, isCancelled } = context;
     const pollMs = context.pollMs || POLL_MS;
     const pollLimit = context.pollLimitMs || POLL_LIMIT_MS;
+    const log = context.log || (() => {});
     const config = settings.custom;
     const submit = Providers.buildCustomRequest({ config, base: settings.baseUrl, ...payload });
     await ensureOrigin(api, submit.url);
     progress(0.45, "Submitting to the endpoint…");
     const response = await api.network.request({ url: submit.url, ...submit.options });
+    context.log("submit " + preview(response));
     if (response.status < 200 || response.status >= 300) {
       const detail = readText(response);
       throw new Error("The endpoint rejected the request (HTTP " + response.status + ")" + (detail ? ": " + detail : ""));
@@ -382,9 +406,10 @@
     };
 
     const timing = { pollMs: options.pollMs, pollLimitMs: options.pollLimitMs };
+    const log = options.log || (() => {});
     const imageValue = settings.provider === "custom"
-      ? await requestCustom({ api, settings, payload, progress, isCancelled, ...timing })
-      : await requestReplicate({ api, settings, payload, progress, isCancelled, ...timing });
+      ? await requestCustom({ api, settings, payload, progress, isCancelled, log, ...timing })
+      : await requestReplicate({ api, settings, payload, progress, isCancelled, log, ...timing });
 
     progress(0.88, "Downloading the result…");
     const generated = await decodeImageValue(api, imageValue, settings.custom && settings.custom.imageSource);
@@ -463,6 +488,7 @@
     downloadImage,
     readJson,
     readText,
+    bodyToText,
     captureSource,
     generate,
     apply,

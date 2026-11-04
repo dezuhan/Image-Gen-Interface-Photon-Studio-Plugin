@@ -111,6 +111,16 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 
 ## Changelog
 
+### 0.1.2
+
+- **Body decoding accepts every shape Photon may hand back**: `Uint8Array`, `ArrayBuffer`, a typed
+  view, or already-decoded text. A text body was being turned into zero bytes, which is why the
+  prediction id came back empty.
+- A submit without an id now reports the real response in the message
+  (`HTTP <status> <content-type> · <body>` + the parsed JSON), and the panel log records each submit,
+  so the next failure is diagnosable without guessing.
+- Tests: 47.
+
 ### 0.1.1
 
 - **Fixed "Polling failed (HTTP 404)".** Photon's `network.request` answers with

@@ -342,6 +342,7 @@ async function runGenerate() {
       seed,
       progress,
       isCancelled: () => cancelled,
+      log,
     });
 
     result = {
