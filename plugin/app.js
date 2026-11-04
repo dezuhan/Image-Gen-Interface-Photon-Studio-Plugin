@@ -569,7 +569,7 @@ function wire() {
   el.model.addEventListener("change", updateModelHint);
   el.prompt.addEventListener("input", () => {
     el.reason.textContent = el.prompt.value.trim()
-      ? "Ready to generate inside " + (el.sourceTag.textContent === "Selection" ? "the selection" : "the layer") + "."
+      ? "Ready to generate inside " + (el.sourceTag.textContent === "2 REFERENCES" ? "the selection" : "the layer") + "."
       : "Describe what to generate inside the selection.";
   });
 }
