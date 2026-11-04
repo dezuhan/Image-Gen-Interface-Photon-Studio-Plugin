@@ -34,7 +34,8 @@ plugin cuts the selection rectangle out of the returned image, scales it to the 
 applies it with `applyImage(captureToken)` — Photon still clips it through the real selection
 coverage, so only the selected area changes.
 
-Without a selection only the layer is sent, and the result becomes a new layer. Models with a real
+Without a selection only the layer is sent, and the result is inserted as a new layer at the
+provider's native size (it is not stretched onto the layer's rectangle). Models with a real
 mask input (FLUX Fill, Stable Diffusion inpainting) keep their native path: `image` + `mask` of the
 crop instead of two references.
 
@@ -130,7 +131,7 @@ same layout as the Upscale panel.
 
 ## Verification status
 
-- **Tested headless:** 58 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
+- **Tested headless:** 61 tests (`core`, `providers`, `pipeline`) with a fake Photon SDK covering the
   capture → submit → poll → download → apply sequence, the masked fallback, cancellation, failed
   predictions and template parsing.
 - **Not yet exercised against live Photon/Replicate in this repository.** The SDK behaviour above was
@@ -138,14 +139,24 @@ same layout as the Upscale panel.
   with the capture token), but a real generation round trip still needs a manual check.
 
 ```powershell
-node tools/core-test.cjs        # 16 tests: masks, bounds, sizes, templates, parsing
-node tools/providers-test.cjs   # 21 tests: Replicate, schema parsing, custom adapters
-node tools/pipeline-test.cjs    # 21 tests: full flow with a fake SDK, schema-driven payloads
+node tools/core-test.cjs        # 17 tests: masks, bounds, sizes, templates, parsing
+node tools/providers-test.cjs   # 22 tests: Replicate, schema parsing, custom adapters
+node tools/pipeline-test.cjs    # 22 tests: full flow with a fake SDK, schema-driven payloads
 node tools/ui-check.cjs         # every element id / key used by app.js exists
 node tools/bench.cjs            # mask/size timings and provider payload sizes
 ```
 
 ## Changelog
+
+### 0.6.0
+
+- **Preview keeps the image's aspect ratio.** The canvas is sized with a fit box (width and height
+  computed from the image) instead of two independent CSS maxima, and it re-fits when the panel is
+  resized.
+- **Whole-layer results are no longer stretched.** With no selection the generated image keeps the
+  provider's native size (e.g. 1536×2752) and is inserted as a new layer; only selection edits are
+  mapped back onto the capture rectangle.
+- Tests: 61.
 
 ### 0.5.1
 

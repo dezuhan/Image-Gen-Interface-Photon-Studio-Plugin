@@ -81,6 +81,9 @@
     }
     const [owner, name] = text.split("/");
     if (!owner || !name) throw new Error("Model must look like owner/name or owner/name:version.");
+    if (/[|\s]/.test(owner) || /[|\s]/.test(name)) {
+      throw new Error("Model contains invalid characters — use a plain owner/name or owner/name:version.");
+    }
     return { owner, name, version: null, spec: text };
   }
 

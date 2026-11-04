@@ -216,8 +216,13 @@ function selectedEntry() {
 }
 
 function readUiIntoSettings() {
-  settings.provider = el.provider.value === "custom" ? "custom" : "replicate";
-  settings.model = el.model.value || settings.model;
+  const [pickedProvider, ...pickedModel] = (el.model.value || "").split(MODEL_SEPARATOR);
+  if (pickedModel.length) {
+    settings.provider = pickedProvider === "custom" ? "custom" : "replicate";
+    settings.model = pickedModel.join(MODEL_SEPARATOR);
+  } else {
+    settings.provider = el.provider.value === "custom" ? "custom" : "replicate";
+  }
   settings.baseUrl = el.baseUrl.value.trim();
   settings.size = el.size.value || "auto";
   settings.aspect = el.aspect.value || "auto";
@@ -353,10 +358,18 @@ async function refreshCredential() {
 
 /* ---------- preview & history ---------- */
 
+function sizePreview(image) {
+  const maxWidth = Math.max(140, (el.preview.clientWidth || 340) - 14);
+  const box = Core.fitBox(image.width, image.height, maxWidth, 220);
+  el.previewCanvas.style.width = box.width + "px";
+  el.previewCanvas.style.height = box.height + "px";
+}
+
 function showPreview(current) {
   const canvas = el.previewCanvas;
   canvas.width = current.image.width;
   canvas.height = current.image.height;
+  sizePreview(current.image);
   const ctx = canvas.getContext("2d");
   const data = ctx.createImageData(current.image.width, current.image.height);
   const pixels = current.hasSelection
@@ -455,16 +468,17 @@ async function runGenerate() {
     const seed = el.seed.value === "" ? Math.floor(Math.random() * 1e9) : Number(el.seed.value);
     const generated = await Pipeline.generate({ api, settings, source, prompt, seed, progress, isCancelled: () => cancelled, log });
 
+    const placement = generated.placement;
     result = {
       image: generated.image,
-      bounds: source.bounds,
-      originX: source.originX,
-      originY: source.originY,
-      captureToken: source.captureToken,
-      mask: source.mask,
-      maskWidth: source.maskWidth,
-      maskHeight: source.maskHeight,
-      hasSelection: source.hasSelection,
+      bounds: placement.bounds,
+      originX: placement.originX,
+      originY: placement.originY,
+      captureToken: placement.captureToken,
+      mask: placement.mask,
+      maskWidth: placement.maskWidth,
+      maskHeight: placement.maskHeight,
+      hasSelection: placement.hasSelection,
       prompt,
       model: settings.model,
       docId: source.doc.id,
@@ -603,9 +617,10 @@ async function testConnection() {
     await api.network.allowEndpoint(new URL(request.url).origin).catch(() => {});
     const reply = await api.network.request({ url: request.url, ...request.options });
     const props = reply.status === 200 ? Providers.parseInputSchema(Pipeline.readJson(reply)) : null;
+    const detail = reply.status === 200 ? "" : Pipeline.readText(reply).slice(0, 160);
     el.testResult.textContent = reply.status === 200
       ? "Connected. " + settings.model + (props ? " · " + props.size + " inputs" : " · schema not readable") + "."
-      : "Replicate answered HTTP " + reply.status + " (check the token and model).";
+      : "Replicate answered HTTP " + reply.status + " (check the token and model)" + (detail ? ": " + detail : "") + ".";
     log("test: " + el.testResult.textContent);
   } catch (error) {
     el.testResult.textContent = Core.describeError(error);
@@ -685,6 +700,9 @@ function wire() {
     el.testResult.textContent = "Settings saved.";
     setState("Idle");
     badge("Ready", "ok");
+  });
+  window.addEventListener("resize", () => {
+    if (result && !el.previewCanvas.hidden) sizePreview(result.image);
   });
   el.prompt.addEventListener("input", () => {
     el.reason.textContent = el.prompt.value.trim()

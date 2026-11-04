@@ -209,6 +209,16 @@
     };
   }
 
+  /** Fit width×height inside a box without changing the aspect ratio. */
+  function fitBox(width, height, maxWidth, maxHeight) {
+    if (!width || !height) return { width: 1, height: 1 };
+    const scale = Math.min(maxWidth / width, maxHeight / height);
+    return {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    };
+  }
+
   function roundTo(value, step) {
     const size = step || 64;
     return Math.max(size, Math.round(value / size) * size);
@@ -313,6 +323,7 @@
     composeAlpha,
     planSize,
     roundTo,
+    fitBox,
     renderTemplate,
     parseJsonTemplate,
     getPath,

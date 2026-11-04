@@ -501,6 +501,38 @@ test("schema-driven payload sends resolution, aspect ratio and temperature", asy
   assert.equal(submit.input.image_input.length, 2);
 });
 
+
+test("whole-layer generation keeps the provider's native size when applied", async () => {
+  const api = fakeApi({ noSelection: true });
+  const settings = replicateSettings({ model: "google/nano-banana-2", size: "1K" });
+  const source = await Pipeline.captureSource({ api, settings });
+  const generated = await Pipeline.generate({ api, settings, source, prompt: "a harbour", seed: 2, pollMs: 1 });
+  assert.equal(generated.placement.hasSelection, false);
+  assert.equal(generated.image.width, 128);
+  assert.equal(generated.image.height, 96);
+  assert.equal(generated.placement.bounds.width, 128);
+  const outcome = await Pipeline.apply({
+    api,
+    result: {
+      image: generated.image,
+      bounds: generated.placement.bounds,
+      originX: generated.placement.originX,
+      originY: generated.placement.originY,
+      captureToken: generated.placement.captureToken,
+      mask: generated.placement.mask,
+      maskWidth: generated.placement.maskWidth,
+      maskHeight: generated.placement.maskHeight,
+      hasSelection: false,
+      prompt: "x",
+      model: "m",
+      docId: "doc1",
+    },
+    name: "native",
+  });
+  assert.equal(outcome.method, "writePixels");
+  assert.equal(api.lastWrite.transfer.options.width, 128);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

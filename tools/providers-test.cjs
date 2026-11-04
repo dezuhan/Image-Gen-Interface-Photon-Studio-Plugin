@@ -281,6 +281,12 @@ test("schemaRequest targets the model endpoint", () => {
   assert.equal(request.options.credential.id, "replicate");
 });
 
+
+test("parseModelSpec rejects malformed names", () => {
+  assert.throws(() => Providers.parseModelSpec("replicate|google/nano-banana-2"), /invalid characters/);
+  assert.throws(() => Providers.parseModelSpec("google/nano banana-2"), /invalid characters/);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

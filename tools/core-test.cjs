@@ -155,6 +155,17 @@ test("truncate caps long prompts", () => {
   assert.ok(Core.truncate("a".repeat(20), 10).endsWith("…"));
 });
 
+
+test("fitBox keeps the aspect ratio inside the preview box", () => {
+  const tall = Core.fitBox(1536, 2752, 340, 220);
+  assert.equal(tall.height, 220);
+  assert.ok(Math.abs(tall.width / tall.height - 1536 / 2752) < 0.01);
+  const wide = Core.fitBox(4000, 1000, 340, 220);
+  assert.equal(wide.width, 340);
+  assert.equal(wide.height, 85);
+  assert.deepEqual(Core.fitBox(0, 0, 340, 220), { width: 1, height: 1 });
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

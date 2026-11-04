@@ -527,12 +527,45 @@
       fitted = resizeRgba(generated.pixels, generated.width, generated.height, source.width, source.height);
     }
 
+    // Whole-layer generation keeps the provider's native size instead of stretching it onto the
+    // layer's rectangle; selection edits must map back onto the capture bounds.
+    const native = !twoReferences && !source.hasSelection;
+    if (native) {
+      return {
+        source,
+        image: { width: generated.width, height: generated.height, pixels: generated.pixels },
+        plan,
+        providerImage: generated,
+        twoReferences,
+        placement: {
+          bounds: { x: source.bounds.x, y: source.bounds.y, width: generated.width, height: generated.height },
+          originX: source.originX,
+          originY: source.originY,
+          hasSelection: false,
+          captureToken: null,
+          mask: Core.solidMask(generated.width, generated.height),
+          maskWidth: generated.width,
+          maskHeight: generated.height,
+        },
+      };
+    }
+
     return {
       source,
       image: { width: source.width, height: source.height, pixels: fitted },
       plan,
       providerImage: generated,
       twoReferences,
+      placement: {
+        bounds: source.bounds,
+        originX: source.originX,
+        originY: source.originY,
+        hasSelection: source.hasSelection,
+        captureToken: source.captureToken,
+        mask: source.mask,
+        maskWidth: source.maskWidth,
+        maskHeight: source.maskHeight,
+      },
     };
   }
 
