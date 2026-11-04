@@ -162,6 +162,11 @@ node tools/bench.cjs            # mask/size timings and provider payload sizes
 
 ## Changelog
 
+### 0.7.2
+
+- Tabs now use the canonical `tabs.js` slider: the active plate moves with a 220 ms standard
+  ease instead of popping between tabs. No layout or behaviour change.
+
 ### 0.7.1
 
 - Added the missing dropdown tokens (`--ig-radius-card`, `--ig-glass`, `--ig-popup-bg`,
